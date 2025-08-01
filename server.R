@@ -2,7 +2,6 @@
 
 # Load all necessary libraries
 library(shiny)
-library(shinydashboard)
 library(readxl)
 library(tidyverse) # Includes dplyr, ggplot2, tibble, etc.
 library(mclust) # For GMM analysis
@@ -30,7 +29,7 @@ filter_data <- function(data, gender_choice, age_min, age_max, col_gender, col_a
 
   if (gender_choice != "Both") {
     filtered_data <- filtered_data %>%
-      filter(str_detect(!!sym(col_gender), regex(gender_choice, ignore_case = TRUE)))
+      filter(grepl(gender_choice, !!sym(col_gender), ignore.case = TRUE))
   }
 
   return(filtered_data)
@@ -133,8 +132,6 @@ plot_age_hgb <- function(df, male_hgb_transformed, female_hgb_transformed) {
 
 # Function to apply universal plausibility limits
 apply_universal_plausibility_limits <- function(data_df) {
-  # Example: Filter HGB to be between 5 and 20 g/dL (adjust as needed)
-  # Example: Filter Age to be non-negative
   filtered_data <- data_df %>%
     filter(HGB >= 5 & HGB <= 20) %>% # Example HGB range
     filter(Age >= 0) # Example non-negative age
@@ -423,8 +420,8 @@ server <- function(input, output, session) {
 
       gmm_data <- gmm_data %>%
         mutate(Gender = case_when(
-          str_detect(Gender_orig, regex("male|m", ignore.case = TRUE)) ~ "Male",
-          str_detect(Gender_orig, regex("female|f", ignore.case = TRUE)) ~ "Female",
+          grepl("male|m", Gender_orig, ignore.case = TRUE) ~ "Male",
+          grepl("female|f", Gender_orig, ignore.case = TRUE) ~ "Female",
           TRUE ~ "Other"
         )) %>%
         filter(Gender %in% c("Male", "Female"))
@@ -487,7 +484,6 @@ server <- function(input, output, session) {
     shinyjs::enable("tabs")
   })
 
-  # Observer for resetting GMM tab
   observeEvent(input$reset_gmm_analysis_btn, {
     gmm_uploaded_data_rv(NULL)
     gmm_processed_data_rv(NULL)
@@ -497,23 +493,25 @@ server <- function(input, output, session) {
     message_rv(list(text = "GMM data and results reset.", type = "info"))
   })
 
-  # Dynamic UI to display GMM results after analysis
   output$gmm_results_ui <- renderUI({
     plot_data <- gmm_processed_data_rv()
     if (is.null(plot_data) || nrow(plot_data) == 0) {
       return(NULL)
     }
 
-    tabBox(
-      title = "Subpopulation Detection Results",
-      id = "gmm_results_tabs", width = NULL,
-      tabPanel("GMM Plot", plotOutput("plot_output_gmm", height = "600px")),
-      tabPanel("Summary", verbatimTextOutput("gmm_summary_output")),
-      tabPanel("Age Group Summary", tableOutput("gmm_age_group_summary_output"))
+    tagList(
+      div(class = "output-box",
+          h4("Subpopulation Plot"),
+          plotOutput("plot_output_gmm", height = "600px")),
+      div(class = "output-box",
+          h4("GMM Summary"),
+          verbatimTextOutput("gmm_summary_output")),
+      div(class = "output-box",
+          h4("Cluster Age Group Summary"),
+          tableOutput("gmm_age_group_summary_output"))
     )
   })
 
-  # Render GMM Plot
   output$plot_output_gmm <- renderPlot({
     plot_data <- gmm_processed_data_rv()
     if (is.null(plot_data) || nrow(plot_data) == 0) {
@@ -524,11 +522,18 @@ server <- function(input, output, session) {
                  female_hgb_transformed = gmm_transformation_details_rv()$female_hgb_transformed)
   })
 
-  # Render GMM Summary
   output$gmm_summary_output <- renderPrint({
     plot_data <- gmm_processed_data_rv()
     if (is.null(plot_data) || nrow(plot_data) == 0) {
       return("No GMM analysis results to display.")
+    }
+
+    gmm_model <- gmm_processed_data_rv()$gmm_model
+
+    cat("--- GMM Analysis Summary ---\n")
+    if (!is.null(gmm_model) && !inherits(gmm_model, "try-error")) {
+        print(summary(gmm_model))
+        cat("\n")
     }
 
     male_summary <- plot_data %>%
@@ -578,7 +583,6 @@ server <- function(input, output, session) {
     }
   })
 
-  # Render GMM Cluster Age Group Summary
   output$gmm_age_group_summary_output <- renderTable({
     plot_data <- gmm_processed_data_rv()
     if (is.null(plot_data) || nrow(plot_data) == 0) {

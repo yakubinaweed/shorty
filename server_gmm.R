@@ -2,7 +2,6 @@
 
 gmmServer <- function(input, output, session, message_rv, analysis_running_rv, gmm_uploaded_data_rv, gmm_processed_data_rv, gmm_transformation_details_rv) {
 
-  # Observer to render the entire UI for the GMM tab
   output$gmm_tab <- renderUI({
     tagList(
       shinyjs::useShinyjs(),
@@ -98,8 +97,8 @@ gmmServer <- function(input, output, session, message_rv, analysis_running_rv, g
 
       gmm_data <- gmm_data %>%
         mutate(Gender = case_when(
-          str_detect(Gender_orig, regex("male|m", ignore.case = TRUE)) ~ "Male",
-          str_detect(Gender_orig, regex("female|f", ignore.case = TRUE)) ~ "Female",
+          grepl("male|m", Gender_orig, ignore.case = TRUE) ~ "Male",
+          grepl("female|f", Gender_orig, ignore.case = TRUE) ~ "Female",
           TRUE ~ "Other"
         )) %>%
         filter(Gender %in% c("Male", "Female"))
@@ -167,7 +166,7 @@ gmmServer <- function(input, output, session, message_rv, analysis_running_rv, g
     gmm_processed_data_rv(NULL)
     gmm_transformation_details_rv(list(male_hgb_transformed = FALSE, female_hgb_transformed = FALSE))
     shinyjs::reset("gmm_file_upload")
-    output$gmm_results_ui <- renderUI(NULL)
+    output$gmm_results_ui <- renderUI(NULL) # Clear the results UI
     message_rv(list(text = "GMM data and results reset.", type = "info"))
   })
 
@@ -177,12 +176,25 @@ gmmServer <- function(input, output, session, message_rv, analysis_running_rv, g
       return(NULL)
     }
 
-    tabBox(
-      title = "Subpopulation Detection Results",
-      id = "gmm_results_tabs", width = NULL,
-      tabPanel("GMM Plot", plotOutput("plot_output_gmm", height = "600px")),
-      tabPanel("Summary", verbatimTextOutput("gmm_summary_output")),
-      tabPanel("Age Group Summary", tableOutput("gmm_age_group_summary_output"))
+    tagList(
+      fluidRow(
+        column(12,
+               h3("GMM Plot"),
+               plotOutput("plot_output_gmm", height = "600px")
+        )
+      ),
+      fluidRow(
+        column(12,
+               h3("GMM Summary"),
+               verbatimTextOutput("gmm_summary_output")
+        )
+      ),
+      fluidRow(
+        column(12,
+               h3("Cluster Age Group Summary"),
+               tableOutput("gmm_age_group_summary_output")
+        )
+      )
     )
   })
 

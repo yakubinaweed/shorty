@@ -2,7 +2,6 @@
 
 mainAnalysisServer <- function(input, output, session, data_reactive, selected_dir_reactive, message_rv, analysis_running_rv) {
 
-  # Observer for file upload: reads the uploaded Excel file
   observeEvent(input$data_file, {
     req(input$data_file)
     tryCatch({
@@ -32,7 +31,6 @@ mainAnalysisServer <- function(input, output, session, data_reactive, selected_d
     })
   })
 
-  # Observer for the Reset button on the Main Analysis tab
   observeEvent(input$reset_btn, {
     shinyjs::reset("data_file")
     data_reactive(NULL)
@@ -45,7 +43,6 @@ mainAnalysisServer <- function(input, output, session, data_reactive, selected_d
     updateSelectInput(session, "col_gender", choices = c("None" = ""), selected = "")
   })
 
-  # Observer for directory selection using shinyFiles
   shinyFiles::shinyDirChoose(
     input, id = 'select_dir_btn',
     roots = c(home = '~', wd = '.'), session = session
@@ -64,7 +61,6 @@ mainAnalysisServer <- function(input, output, session, data_reactive, selected_d
     }
   })
 
-  # Observer for the Analyze button
   observeEvent(input$analyze_btn, {
     if (analysis_running_rv()) {
       message_rv(list(text = "Analysis is already running. Please wait or reset.", type = "warning"))
@@ -114,10 +110,7 @@ mainAnalysisServer <- function(input, output, session, data_reactive, selected_d
       }
 
       output$result_text <- renderPrint({
-        # Capture the entire output of the print method to a vector of strings
-        summary_output <- capture.output(print(refiner_model))
-        # Use cat to print each element of the vector, preserving newlines
-        cat(summary_output, sep = "\n")
+        print(refiner_model)
       })
 
       output$result_plot <- renderPlot({

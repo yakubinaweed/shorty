@@ -60,6 +60,7 @@ ui <- navbarPage(
       ),
       mainPanel(
         style = "padding-left: 15px;",
+        h3("Analysis Results"),
         plotOutput("result_plot", height = "400px"),
         verbatimTextOutput("result_text")
       )
@@ -81,7 +82,12 @@ ui <- navbarPage(
              actionButton("reset_gmm_analysis_btn", "Reset GMM Data", class = "btn-secondary")
       ),
       column(8,
-             uiOutput("gmm_results_ui")
+             h3("GMM Analysis Results"),
+             plotOutput("plot_output_gmm", height = "600px"),
+             h4("GMM Summary"),
+             verbatimTextOutput("gmm_summary_output"),
+             h4("Cluster Age Group Summary"),
+             tableOutput("gmm_age_group_summary_output")
       )
     )
   ),

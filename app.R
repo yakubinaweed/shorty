@@ -9,6 +9,9 @@ library(moments)
 library(shinyjs)
 library(shinyWidgets)
 library(shinyFiles)
+library(tidyverse)
+library(mclust)
+library(car)
 
 # Source UI and Server logic from separate files
 source("ui.R")
