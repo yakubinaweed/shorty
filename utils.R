@@ -120,7 +120,7 @@ plot_age_hgb <- function(df, male_hgb_transformed, female_hgb_transformed) {
     theme(legend.position = "bottom")
 }
 
-# Function to apply universal plausibility limits
+# Function to apply universal plausibility limits (example, currently not used in server)
 apply_universal_plausibility_limits <- function(data_df) {
   filtered_data <- data_df %>%
     filter(HGB >= 5 & HGB <= 20) %>% # Example HGB range

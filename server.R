@@ -1,7 +1,6 @@
 # server.R
 
 # Load all necessary libraries.
-# All library calls should be here in the main server file.
 library(shiny)
 library(readxl)
 library(tidyverse)
@@ -25,6 +24,7 @@ server <- function(input, output, session) {
   gmm_uploaded_data_rv <- reactiveVal(NULL)
   gmm_processed_data_rv <- reactiveVal(NULL)
   gmm_transformation_details_rv <- reactiveVal(list(male_hgb_transformed = FALSE, female_hgb_transformed = FALSE))
+  gmm_models_rv <- reactiveVal(list(male = NULL, female = NULL)) # Reactive for storing GMM models
   selected_dir_reactive <- reactiveVal(NULL)
   message_rv <- reactiveVal(list(type = "", text = ""))
   analysis_running_rv <- reactiveVal(FALSE)
@@ -316,6 +316,8 @@ server <- function(input, output, session) {
       combined_clustered_data <- tibble()
       male_hgb_transformed_flag <- FALSE
       female_hgb_transformed_flag <- FALSE
+      male_gmm_model <- NULL
+      female_gmm_model <- NULL
 
       if (nrow(male_data) > 0) {
         yj_result_male <- apply_conditional_yeo_johnson(male_data$HGB)
@@ -350,6 +352,9 @@ server <- function(input, output, session) {
         })
         combined_clustered_data <- bind_rows(combined_clustered_data, female_data %>% dplyr::select(HGB, Age, Gender, cluster))
       }
+      
+      # Store the models in the new reactive value
+      gmm_models_rv(list(male = male_gmm_model, female = female_gmm_model))
 
       gmm_transformation_details_rv(list(male_hgb_transformed = male_hgb_transformed_flag, female_hgb_transformed = female_hgb_transformed_flag))
 
@@ -372,6 +377,7 @@ server <- function(input, output, session) {
     gmm_uploaded_data_rv(NULL)
     gmm_processed_data_rv(NULL)
     gmm_transformation_details_rv(list(male_hgb_transformed = FALSE, female_hgb_transformed = FALSE))
+    gmm_models_rv(list(male = NULL, female = NULL)) # Reset the models
     shinyjs::reset("gmm_file_upload")
     output$gmm_results_ui <- renderUI(NULL)
     message_rv(list(text = "GMM data and results reset.", type = "info"))
@@ -408,58 +414,80 @@ server <- function(input, output, session) {
 
   output$gmm_summary_output <- renderPrint({
     plot_data <- gmm_processed_data_rv()
+    models <- gmm_models_rv()
+    
     if (is.null(plot_data) || nrow(plot_data) == 0) {
       return("No GMM analysis results to display.")
     }
 
-    # This part of the code is not used.
-    # gmm_model <- gmm_processed_data_rv()$gmm_model
-    # cat("--- GMM Analysis Summary ---\n")
-    # if (!is.null(gmm_model) && !inherits(gmm_model, "try-error")) {
-    #     print(summary(gmm_model))
-    #     cat("\n")
-    # }
-
-    male_summary <- plot_data %>%
-      filter(Gender == "Male") %>%
-      group_by(cluster) %>%
-      summarise(
-        Proportion = n() / nrow(.) * 100,
-        Mean_HGB = mean(HGB, na.rm = TRUE),
-        SD_HGB = sd(HGB, na.rm = TRUE),
-        Mean_Age = mean(Age, na.rm = TRUE),
-        SD_Age = sd(Age, na.rm = TRUE),
-        Min_Age = min(Age, na.rm = TRUE),
-        Max_Age = max(Age, na.rm = TRUE)
-      ) %>%
-      mutate_if(is.numeric, ~round(., 2))
-
-    female_summary <- plot_data %>%
-      filter(Gender == "Female") %>%
-      group_by(cluster) %>%
-      summarise(
-        Proportion = n() / nrow(.) * 100,
-        Mean_HGB = mean(HGB, na.rm = TRUE),
-        SD_HGB = sd(HGB, na.rm = TRUE),
-        Mean_Age = mean(Age, na.rm = TRUE),
-        SD_Age = sd(Age, na.rm = TRUE),
-        Min_Age = min(Age, na.rm = TRUE),
-        Max_Age = max(Age, na.rm = TRUE)
-      ) %>%
-      mutate_if(is.numeric, ~round(., 2))
-
-    cat("--- GMM Analysis Summary (Male Subpopulations) ---\n")
-    if (nrow(male_summary) > 0) {
-      print(male_summary)
+    cat("--- GMM Analysis Summary ---\n")
+    
+    # Process Male data
+    if (!is.null(models$male) && !inherits(models$male, "try-error")) {
+        cat("\n--- Male Subpopulations ---\n")
+        num_clusters <- models$male$G
+        for (i in 1:num_clusters) {
+            cat(paste0("Cluster ", i, ":\n"))
+            cat(paste0("  Proportion: ", round(models$male$parameters$pro[i], 3), "\n"))
+            
+            # Use the original (untransformed, un-z-scored) means and sds for display
+            male_cluster_data <- plot_data %>% filter(Gender == "Male", cluster == i)
+            mean_hgb <- mean(male_cluster_data$HGB, na.rm = TRUE)
+            mean_age <- mean(male_cluster_data$Age, na.rm = TRUE)
+            sd_hgb <- sd(male_cluster_data$HGB, na.rm = TRUE)
+            sd_age <- sd(male_cluster_data$Age, na.rm = TRUE)
+            
+            cat(paste0("  Mean HGB: ", round(mean_hgb, 3), "\n"))
+            cat(paste0("  Mean Age: ", round(mean_age, 3), "\n"))
+            cat(paste0("  Std Dev HGB: ", round(sd_hgb, 3), "\n"))
+            cat(paste0("  Std Dev Age: ", round(sd_age, 3), "\n"))
+            
+            # Estimated age range
+            if (!is.na(sd_age)) {
+              lower_age <- round(mean_age - 2 * sd_age, 1)
+              upper_age <- round(mean_age + 2 * sd_age, 1)
+              cat(paste0("  Estimated Age Range (Mean +/- 2SD): [", max(0, lower_age), " to ", upper_age, "] years\n"))
+            } else {
+              cat("  Estimated Age Range: N/A (Std Dev Age problematic)\n")
+            }
+            cat("\n")
+        }
     } else {
-      cat("No male subpopulations detected.\n")
+        cat("No male subpopulations detected.\n")
     }
-
-    cat("\n--- GMM Analysis Summary (Female Subpopulations) ---\n")
-    if (nrow(female_summary) > 0) {
-      print(female_summary)
+    
+    # Process Female data
+    if (!is.null(models$female) && !inherits(models$female, "try-error")) {
+        cat("\n--- Female Subpopulations ---\n")
+        num_clusters <- models$female$G
+        for (i in 1:num_clusters) {
+            cat(paste0("Cluster ", i, ":\n"))
+            cat(paste0("  Proportion: ", round(models$female$parameters$pro[i], 3), "\n"))
+            
+            # Use the original (untransformed, un-z-scored) means and sds for display
+            female_cluster_data <- plot_data %>% filter(Gender == "Female", cluster == i)
+            mean_hgb <- mean(female_cluster_data$HGB, na.rm = TRUE)
+            mean_age <- mean(female_cluster_data$Age, na.rm = TRUE)
+            sd_hgb <- sd(female_cluster_data$HGB, na.rm = TRUE)
+            sd_age <- sd(female_cluster_data$Age, na.rm = TRUE)
+            
+            cat(paste0("  Mean HGB: ", round(mean_hgb, 3), "\n"))
+            cat(paste0("  Mean Age: ", round(mean_age, 3), "\n"))
+            cat(paste0("  Std Dev HGB: ", round(sd_hgb, 3), "\n"))
+            cat(paste0("  Std Dev Age: ", round(sd_age, 3), "\n"))
+            
+            # Estimated age range
+            if (!is.na(sd_age)) {
+              lower_age <- round(mean_age - 2 * sd_age, 1)
+              upper_age <- round(mean_age + 2 * sd_age, 1)
+              cat(paste0("  Estimated Age Range (Mean +/- 2SD): [", max(0, lower_age), " to ", upper_age, "] years\n"))
+            } else {
+              cat("  Estimated Age Range: N/A (Std Dev Age problematic)\n")
+            }
+            cat("\n")
+        }
     } else {
-      cat("No female subpopulations detected.\n")
+        cat("No female subpopulations detected.\n")
     }
 
     if (gmm_transformation_details_rv()$male_hgb_transformed || gmm_transformation_details_rv()$female_hgb_transformed) {
