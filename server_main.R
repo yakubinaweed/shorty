@@ -2,6 +2,9 @@
 
 mainServer <- function(input, output, session, data_reactive, selected_dir_reactive, message_rv, analysis_running_rv) {
 
+  # Reactive value to hold the refineR model result
+  refiner_model_rv <- reactiveVal(NULL)
+
   # Observer for file upload: reads the uploaded Excel file
   observeEvent(input$data_file, {
     req(input$data_file)
@@ -36,6 +39,7 @@ mainServer <- function(input, output, session, data_reactive, selected_dir_react
   observeEvent(input$reset_btn, {
     shinyjs::reset("data_file")
     data_reactive(NULL)
+    refiner_model_rv(NULL) # Reset the model
     message_rv(list(type = "", text = ""))
     output$result_text <- renderPrint({ cat("") })
     output$result_plot <- renderPlot(plot.new())
@@ -63,6 +67,15 @@ mainServer <- function(input, output, session, data_reactive, selected_dir_react
       }
     }
   })
+  
+  # Reactive expression for filtered data
+  filtered_data_reactive <- reactive({
+    req(data_reactive(), input$col_value, input$col_age, input$col_gender)
+    if (input$col_value == "" || input$col_age == "" || input$col_gender == "") {
+      return(NULL)
+    }
+    filter_data(data_reactive(), input$gender_choice, input$age_range[1], input$age_range[2], input$col_gender, input$col_age)
+  })
 
   # Observer for the Analyze button
   observeEvent(input$analyze_btn, {
@@ -71,16 +84,18 @@ mainServer <- function(input, output, session, data_reactive, selected_dir_react
       return()
     }
 
-    req(data_reactive(), input$col_value, input$col_age, input$col_gender)
-    if (input$col_value == "" || input$col_age == "" || input$col_gender == "") {
-      message_rv(list(text = "Please select all required columns (Value, Age, Gender).", type = "warning"))
+    filtered_data <- filtered_data_reactive()
+    req(filtered_data)
+    
+    if (nrow(filtered_data) == 0) {
+      message_rv(list(text = "Filtered dataset is empty. Please adjust your filtering criteria.", type = "danger"))
       return()
     }
-
+    
     # Disable button and change text when analysis starts
     shinyjs::disable("analyze_btn")
     shinyjs::runjs("$('#analyze_btn').text('Analyzing...');")
-
+    
     analysis_running_rv(TRUE)
     message_rv(list(text = "Analysis started...", type = "info"))
     session$sendCustomMessage('analysisStatus', TRUE)
@@ -103,12 +118,6 @@ mainServer <- function(input, output, session, data_reactive, selected_dir_react
     refiner_model <- NULL
     
     tryCatch({
-      filtered_data <- filter_data(data_reactive(), isolated_inputs$gender_choice, isolated_inputs$age_range[1], isolated_inputs$age_range[2], isolated_inputs$col_gender, isolated_inputs$col_age)
-      
-      if (nrow(filtered_data) == 0) {
-        stop("Filtered dataset is empty. Please adjust your filtering criteria.")
-      }
-      
       nbootstrap_value <- switch(isolated_inputs$nbootstrap_speed, "Fast" = 1, "Medium" = 50, "Slow" = 200, 1)
 
       refiner_model <- refineR::findRI(Data = filtered_data[[isolated_inputs$col_value]], NBootstrap = nbootstrap_value)
@@ -116,37 +125,43 @@ mainServer <- function(input, output, session, data_reactive, selected_dir_react
       if (is.null(refiner_model) || inherits(refiner_model, "try-error")) {
         stop("RefineR model could not be generated. Check your input data and parameters.")
       }
-
-      plot_title <- paste0("Estimated Reference Intervals for ", isolated_inputs$col_value, 
-                           " (Gender: ", isolated_inputs$gender_choice, 
-                           ", Age: ", isolated_inputs$age_range[1], "-", isolated_inputs$age_range[2], ")")
+      
+      refiner_model_rv(refiner_model)
       
       output$result_text <- renderPrint({
         print(refiner_model)
       })
 
-      output$result_plot <- renderPlot({
-        if (!is.null(filtered_data) && nrow(filtered_data) > 0) {
-          plot(refiner_model, showCI = TRUE, RIperc = c(0.025, 0.975), showPathol = FALSE,
-               title = plot_title,
-               xlab = sprintf("%s [%s]", isolated_inputs$col_value, isolated_inputs$unit_input))
-
-          if (!is.na(isolated_inputs$ref_low)) { abline(v = isolated_inputs$ref_low, col = "red", lty = 2) }
-          if (!is.na(isolated_inputs$ref_high)) { abline(v = isolated_inputs$ref_high, col = "blue", lty = 2) }
-        } else {
-          plot.new()
-          text(0.5, 0.5, "No data to plot after filtering.", cex = 1.5)
-        }
-      })
-
       if (isolated_inputs$enable_directory && !is.null(selected_dir_reactive())) {
+        plot_title <- paste0("Estimated Reference Intervals for ", isolated_inputs$col_value, 
+                           " (Gender: ", isolated_inputs$gender_choice, 
+                           ", Age: ", isolated_inputs$age_range[1], "-", isolated_inputs$age_range[2], ")")
+
         filename <- generate_safe_filename("RefineR_Plot", selected_dir_reactive(), "png")
         png(filename, width = 800, height = 600)
+        
         plot(refiner_model, showCI = TRUE, RIperc = c(0.025, 0.975), showPathol = FALSE,
              title = plot_title,
              xlab = sprintf("%s [%s]", isolated_inputs$col_value, isolated_inputs$unit_input))
-        if (!is.na(isolated_inputs$ref_low)) { abline(v = isolated_inputs$ref_low, col = "red", lty = 2) }
-        if (!is.na(isolated_inputs$ref_high)) { abline(v = isolated_inputs$ref_high, col = "blue", lty = 2) }
+
+        usr <- par("usr")
+        y_max <- usr[4]
+        y_label_pos <- y_max * 0.95
+
+        if (!is.na(isolated_inputs$ref_low) && is.numeric(isolated_inputs$ref_low)) {
+          abline(v = isolated_inputs$ref_low, col = "red", lty = 2, lwd = 2)
+          text(x = isolated_inputs$ref_low, y = y_label_pos,
+               labels = round(isolated_inputs$ref_low, 2),
+               col = "red", cex = 1.1, pos = 4)
+        }
+
+        if (!is.na(isolated_inputs$ref_high) && is.numeric(isolated_inputs$ref_high)) {
+          abline(v = isolated_inputs$ref_high, col = "blue", lty = 2, lwd = 2)
+          text(x = isolated_inputs$ref_high, y = y_label_pos,
+               labels = round(isolated_inputs$ref_high, 2),
+               col = "blue", cex = 1.1, pos = 2)
+        }
+        
         dev.off()
         message_rv(list(text = paste0("Plot saved to ", selected_dir_reactive()), type = "success"))
       }
@@ -166,5 +181,40 @@ mainServer <- function(input, output, session, data_reactive, selected_dir_react
       shinyjs::enable("analyze_btn")
       shinyjs::runjs("$('#analyze_btn').text('Analyze');")
     })
+  })
+
+  # Live-updating plot output that depends on reactive inputs
+  output$result_plot <- renderPlot({
+    refiner_model <- refiner_model_rv()
+    filtered_data <- filtered_data_reactive()
+    req(refiner_model, filtered_data)
+
+    plot_title <- paste0("Estimated Reference Intervals for ", input$col_value, 
+                         " (Gender: ", input$gender_choice, 
+                         ", Age: ", input$age_range[1], "-", input$age_range[2], ")")
+
+    plot(refiner_model, showCI = TRUE, RIperc = c(0.025, 0.975), showPathol = FALSE,
+         title = plot_title,
+         xlab = sprintf("%s [%s]", input$col_value, input$unit_input))
+
+    usr <- par("usr")
+    y_max <- usr[4]
+    y_label_pos <- y_max * 0.95
+
+    # Live update manual lower limit line and text
+    if (!is.na(input$ref_low) && is.numeric(input$ref_low)) {
+      abline(v = input$ref_low, col = "red", lty = 2, lwd = 2)
+      text(x = input$ref_low, y = y_label_pos,
+           labels = round(input$ref_low, 2),
+           col = "red", cex = 1.1, pos = 4)
+    }
+
+    # Live update manual upper limit line and text
+    if (!is.na(input$ref_high) && is.numeric(input$ref_high)) {
+      abline(v = input$ref_high, col = "blue", lty = 2, lwd = 2)
+      text(x = input$ref_high, y = y_label_pos,
+           labels = round(input$ref_high, 2),
+           col = "blue", cex = 1.1, pos = 2)
+    }
   })
 }
