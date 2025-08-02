@@ -109,7 +109,7 @@ gmmServer <- function(input, output, session, gmm_uploaded_data_rv, gmm_processe
           message_rv(list(text = paste("Error running GMM for male data:", e$message), type = "error"))
         })
         # Only combine if clusters were assigned
-        if (!is.null(male_gmm_model)) {
+        if (!is.null(male_gmm_model) && "cluster" %in% names(male_data)) {
           combined_clustered_data <- bind_rows(combined_clustered_data, male_data %>% dplyr::select(HGB, Age, Gender, cluster))
         }
       }
@@ -131,7 +131,7 @@ gmmServer <- function(input, output, session, gmm_uploaded_data_rv, gmm_processe
           message_rv(list(text = paste("Error running GMM for female data:", e$message), type = "error"))
         })
         # Only combine if clusters were assigned
-        if (!is.null(female_gmm_model)) {
+        if (!is.null(female_gmm_model) && "cluster" %in% names(female_data)) {
           combined_clustered_data <- bind_rows(combined_clustered_data, female_data %>% dplyr::select(HGB, Age, Gender, cluster))
         }
       }

@@ -71,7 +71,7 @@ ui <- navbarPage(
     title = "Subpopulation Detection (GMM)",
     useShinyjs(),
     h4("Detect Subpopulations using HGB and Age"),
-    p("Gaussian Mixture Models aim to detect hidden subpopulations within your data based on HGB and Age. The system will automatically select the best number of components (between 2 and 5) using the Bayesian Information Criterion (BIC), where the lowest BIC value indicates the optimal fit. For each detected subpopulation, estimated age ranges will be provided directly from the model's characteristics, avoiding predefined bins. While increasing the number of components can improve model fit, it also increases the risk of overfitting, where the model learns noise rather than true underlying patterns."),
+    p("Gaussian Mixture Models aim to detect hidden subpopulations within your data based on HGB and Age. The system will automatically select the best model and number of components based on your chosen criterion (BIC or ICL). ICL is often better for identifying well-separated clusters, as it penalizes models with significant cluster overlap. For each detected subpopulation, estimated age ranges will be provided directly from the model's characteristics, avoiding predefined bins. While increasing the number of components can improve model fit, it also increases the risk of overfitting, where the model learns noise rather than true underlying patterns."),
     sidebarLayout(
       sidebarPanel(
         fileInput(inputId = "gmm_file_upload", label = "Upload Data (Excel File)", accept = c(".xlsx")),
