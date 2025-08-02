@@ -16,10 +16,24 @@ filter_data <- function(data, gender_choice, age_min, age_max, col_gender, col_a
 
   filtered_data <- data %>%
     filter(!!sym(col_age) >= age_min & !!sym(col_age) <= age_max)
-
+  
+  # Add a temporary Gender column with standardized values based on regex
+  filtered_data <- filtered_data %>%
+    mutate(Gender_Standardized = case_when(
+      # Extensive regex for male terms and symbols (English and Dutch)
+      grepl("male|m|man|jongen(s)?|heren|mannelijk(e)?", !!sym(col_gender), ignore.case = TRUE) ~ "Male",
+      # Extensive regex for female terms and symbols (English and Dutch), including 'V'
+      grepl("female|f|vrouw(en)?|v|meisje(s)?|dame|mevr|vrouwelijke", !!sym(col_gender), ignore.case = TRUE) ~ "Female",
+      TRUE ~ "Other"
+    ))
+  
   if (gender_choice != "Both") {
+    # Filter the data based on the standardized gender column and the user's choice
     filtered_data <- filtered_data %>%
-      filter(grepl(gender_choice, !!sym(col_gender), ignore.case = TRUE))
+      filter(Gender_Standardized == case_when(
+        gender_choice == "M" ~ "Male",
+        gender_choice == "F" ~ "Female"
+      ))
   }
 
   return(filtered_data)

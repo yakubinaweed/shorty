@@ -77,6 +77,10 @@ mainServer <- function(input, output, session, data_reactive, selected_dir_react
       return()
     }
 
+    # Disable button and change text when analysis starts
+    shinyjs::disable("analyze_btn")
+    shinyjs::runjs("$('#analyze_btn').text('Analyzing...');")
+
     analysis_running_rv(TRUE)
     message_rv(list(text = "Analysis started...", type = "info"))
     session$sendCustomMessage('analysisStatus', TRUE)
@@ -112,6 +116,10 @@ mainServer <- function(input, output, session, data_reactive, selected_dir_react
       if (is.null(refiner_model) || inherits(refiner_model, "try-error")) {
         stop("RefineR model could not be generated. Check your input data and parameters.")
       }
+
+      plot_title <- paste0("Estimated Reference Intervals for ", isolated_inputs$col_value, 
+                           " (Gender: ", isolated_inputs$gender_choice, 
+                           ", Age: ", isolated_inputs$age_range[1], "-", isolated_inputs$age_range[2], ")")
       
       output$result_text <- renderPrint({
         print(refiner_model)
@@ -120,7 +128,7 @@ mainServer <- function(input, output, session, data_reactive, selected_dir_react
       output$result_plot <- renderPlot({
         if (!is.null(filtered_data) && nrow(filtered_data) > 0) {
           plot(refiner_model, showCI = TRUE, RIperc = c(0.025, 0.975), showPathol = FALSE,
-               title = paste("Estimated Reference Intervals"),
+               title = plot_title,
                xlab = sprintf("%s [%s]", isolated_inputs$col_value, isolated_inputs$unit_input))
 
           if (!is.na(isolated_inputs$ref_low)) { abline(v = isolated_inputs$ref_low, col = "red", lty = 2) }
@@ -135,7 +143,7 @@ mainServer <- function(input, output, session, data_reactive, selected_dir_react
         filename <- generate_safe_filename("RefineR_Plot", selected_dir_reactive(), "png")
         png(filename, width = 800, height = 600)
         plot(refiner_model, showCI = TRUE, RIperc = c(0.025, 0.975), showPathol = FALSE,
-             title = paste("Estimated Reference Intervals"),
+             title = plot_title,
              xlab = sprintf("%s [%s]", isolated_inputs$col_value, isolated_inputs$unit_input))
         if (!is.na(isolated_inputs$ref_low)) { abline(v = isolated_inputs$ref_low, col = "red", lty = 2) }
         if (!is.na(isolated_inputs$ref_high)) { abline(v = isolated_inputs$ref_high, col = "blue", lty = 2) }
@@ -154,6 +162,9 @@ mainServer <- function(input, output, session, data_reactive, selected_dir_react
     }, finally = {
       analysis_running_rv(FALSE)
       session$sendCustomMessage('analysisStatus', FALSE)
+      # Re-enable button and restore text when analysis finishes
+      shinyjs::enable("analyze_btn")
+      shinyjs::runjs("$('#analyze_btn').text('Analyze');")
     })
   })
 }

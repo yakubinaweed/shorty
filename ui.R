@@ -57,12 +57,11 @@ ui <- navbarPage(
         hr(),
         numericInput("ref_low", "Reference Lower Limit:", value = NA),
         numericInput("ref_high", "Reference Upper Limit:", value = NA),
-        textInput(inputId = "unit_input", label = "Unit of Measurement", value = "mmol/L", placeholder = "mmol/L")
+        textInput(inputId = "unit_input", label = "Unit of Measurement", value = "mmol/L", placeholder = "ex. g/L")
       ),
       mainPanel(
         style = "padding-left: 15px;",
-        h3("Analysis Results"),
-        plotOutput("result_plot", height = "400px"),
+        plotOutput("result_plot"),
         verbatimTextOutput("result_text")
       )
     )
