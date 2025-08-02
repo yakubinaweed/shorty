@@ -123,14 +123,27 @@ plot_age_hgb <- function(df, male_hgb_transformed, female_hgb_transformed) {
   if (female_hgb_transformed) {
     plot_subtitle <- paste(plot_subtitle, "Female HGB transformed for GMM.", sep="\n")
   }
+  
+  # Calculate cluster means
+  cluster_means <- df %>%
+    group_by(Gender, cluster) %>%
+    summarise(mean_Age = mean(Age, na.rm = TRUE),
+              mean_HGB = mean(HGB, na.rm = TRUE),
+              .groups = 'drop')
 
   ggplot(df, aes(x = Age, y = HGB, color = factor(cluster))) +
-    geom_point(alpha = 0.7) +
+    geom_point(position = position_jitter(width = 0.2, height = 0.2), alpha = 0.6) +
+    # Use stat_ellipse to plot 95% confidence regions for each cluster
+    stat_ellipse(geom = "polygon", aes(fill = factor(cluster)), alpha = 0.2, show.legend = FALSE, level = 0.95) +
+    # Add a large red point for the mean of each cluster
+    geom_point(data = cluster_means, aes(x = mean_Age, y = mean_HGB), shape = 4, size = 5, color = "red", stroke = 2) +
     facet_wrap(~Gender) +
     theme_minimal() +
     labs(title = plot_title,
          subtitle = plot_subtitle,
          x = "Age", y = "HGB", color = "Cluster") +
+    scale_color_brewer(palette = "Set1") +
+    scale_fill_brewer(palette = "Set1") +
     theme(legend.position = "bottom")
 }
 
