@@ -1,223 +1,286 @@
-# Observer for file input in the Second Tab
-  observeEvent(input$gmm_data_file, {
-    print("DEBUG: gmm_data_file observer triggered.")
-    req(input$gmm_data_file)
-    if (!analysis_running()) {
-      tryCatch({
-        print("DEBUG: Attempting to read GMM data.")
-        data <- read_excel(input$gmm_data_file$datapath)
+# server_gmm.R
 
-        gmm_data_reactive(data) # Store raw data initially
+gmmServer <- function(input, output, session, gmm_uploaded_data_rv, gmm_processed_data_rv, gmm_transformation_details_rv, gmm_models_rv, message_rv, analysis_running_rv) {
 
-        col_names <- colnames(data)
-
-        updateSelectInput(session, "gmm_col_value",
-                          choices = c("None" = "", col_names), selected = "")
-        updateSelectInput(session, "gmm_col_age",
-                          choices = c("None" = "", col_names), selected = "")
-        message_rv(list(text = "Data loaded for Subpopulation Detection! Please select columns.", type = "success"))
-        print("DEBUG: GMM data loaded and selectors updated.")
-      }, error = function(e) {
-        message_rv(list(text = paste("Error loading data for GMM:", e$message), type = "danger"))
-        print(paste("DEBUG ERROR: Error loading GMM data:", e$message))
-      })
-    } else {
-      message_rv(list(text = "Cannot load data while Main Analysis is running. Please wait or reset.", type = "warning"))
-      print("DEBUG: GMM data load blocked by main analysis.")
-    }
+  # Observer for GMM file upload
+  observeEvent(input$gmm_file_upload, {
+    req(input$gmm_file_upload)
+    tryCatch({
+      data <- readxl::read_excel(input$gmm_file_upload$datapath)
+      gmm_uploaded_data_rv(data)
+      message_rv(list(text = "GMM data uploaded successfully.", type = "success"))
+    }, error = function(e) {
+      message_rv(list(text = paste("Error reading GMM file:", e$message), type = "error"))
+      gmm_uploaded_data_rv(NULL)
+    })
   })
 
-  # Observer for "Run Subpopulation Detection" button
-  observeEvent(input$run_gmm_analysis, {
-    print("DEBUG: run_gmm_analysis observer triggered.")
-    if (input$tabs == "Subpopulation Detection (GMM)" && !analysis_running()) {
-      req(gmm_data_reactive(), input$gmm_col_value, input$gmm_col_age)
-      if (is.null(input$gmm_col_value) || input$gmm_col_value == "" || input$gmm_col_value == "None" ||
-          is.null(input$gmm_col_age) || input$gmm_col_age == "" || input$gmm_col_age == "None") {
-        message_rv(list(text = "Please select both 'HGB Values' and 'Age' columns for subpopulation detection.", type = "warning"))
-        print("DEBUG: GMM analysis: Missing column selection.")
-        return()
+  # Dynamic UI for GMM column selectors
+  output$gmm_hgb_col_selector <- renderUI({
+    data <- gmm_uploaded_data_rv()
+    if (is.null(data)) return(NULL)
+    selectInput("gmm_hgb_col", "Select HGB Column:", choices = names(data),
+                selected = c("HGB", "hgb", "HB", "hb")[c("HGB", "hgb", "HB", "hb") %in% names(data)][1])
+  })
+
+  output$gmm_age_col_selector <- renderUI({
+    data <- gmm_uploaded_data_rv()
+    if (is.null(data)) return(NULL)
+    selectInput("gmm_age_col", "Select Age Column:", choices = names(data),
+                selected = c("Age", "age")[c("Age", "age") %in% names(data)][1])
+  })
+
+  output$gmm_gender_col_selector <- renderUI({
+    data <- gmm_uploaded_data_rv()
+    if (is.null(data)) return(NULL)
+    selectInput("gmm_gender_col", "Select Gender Column:", choices = names(data),
+                selected = c("Gender", "gender", "Sex", "sex")[c("Gender", "gender", "Sex", "sex") %in% names(data)][1])
+  })
+
+  # Observer for GMM analysis button
+  observeEvent(input$run_gmm_analysis_btn, {
+    req(gmm_uploaded_data_rv(), input$gmm_hgb_col, input$gmm_age_col, input$gmm_gender_col)
+
+    if (analysis_running_rv()) {
+      message_rv(list(text = "An analysis is already running. Please wait.", type = "warning"))
+      return(NULL)
+    }
+
+    analysis_running_rv(TRUE)
+    shinyjs::disable("tabs")
+
+    withProgress(message = 'Running GMM Analysis', value = 0, {
+      incProgress(0.1, detail = "Loading data...")
+
+      data <- gmm_uploaded_data_rv()
+      hgb_col <- input$gmm_hgb_col
+      age_col <- input$gmm_age_col
+      gender_col <- input$gmm_gender_col
+
+      if (!all(c(hgb_col, age_col, gender_col) %in% names(data))) {
+        message_rv(list(text = "Selected columns not found in data. Please check selections.", type = "error"))
+        analysis_running_rv(FALSE)
+        shinyjs::enable("tabs")
+        return(NULL)
       }
 
-      analysis_running(TRUE)
-      message_rv(list(text = "Detecting subpopulations...", type = "info"))
-      print("DEBUG: Subpopulation detection started.")
+      gmm_data <- data %>%
+        dplyr::select(HGB = !!sym(hgb_col), Age = !!sym(age_col), Gender_orig = !!sym(gender_col)) %>%
+        na.omit()
 
-      tryCatch({
-        full_original_data <- gmm_data_reactive() # Get the original loaded data
+      if (nrow(gmm_data) == 0) {
+        message_rv(list(text = "No complete rows for GMM after NA removal. Check data or selections.", type = "error"))
+        analysis_running_rv(FALSE)
+        shinyjs::enable("tabs")
+        return(NULL)
+      }
 
-        # --- Generate age_group_label just before analysis, now that gmm_col_age is selected ---
-        age_col_values_for_labeling <- as.numeric(full_original_data[[input$gmm_col_age]])
-        breaks_for_cut <- c(-Inf, 10, 30, 40, 100, Inf)
-        labels_for_cut <- c("0-10 years", "10-30 years", "30-40 years", "40-100 years", "100+ years")
-        full_original_data$age_group_label_for_gmm <- cut(age_col_values_for_labeling,
-                                                           breaks = breaks_for_cut,
-                                                           labels = labels_for_cut,
-                                                           right = FALSE,
-                                                           include.lowest = TRUE)
-        print("DEBUG: 'age_group_label_for_gmm' column created just before analysis.")
-        # --- END NEW: Generate age_group_label here ---
+      incProgress(0.2, detail = "Splitting data by gender and transforming...")
 
+      gmm_data <- gmm_data %>%
+        mutate(Gender = case_when(
+          grepl("male|m", Gender_orig, ignore.case = TRUE) ~ "Male",
+          grepl("female|f", Gender_orig, ignore.case = TRUE) ~ "Female",
+          TRUE ~ "Other"
+        )) %>%
+        filter(Gender %in% c("Male", "Female"))
 
-        # Extract HGB and Age columns directly using the input names
-        hgb_values_raw <- full_original_data[[input$gmm_col_value]]
-        age_values_raw <- full_original_data[[input$gmm_col_age]]
+      male_data <- gmm_data %>% filter(Gender == "Male")
+      female_data <- gmm_data %>% filter(Gender == "Female")
 
-        # Combine into a data frame, then omit NAs. This ensures 'data_for_mclust'
-        # and its corresponding 'age_group_label' are aligned by row.
-        temp_data_with_labels_for_mclust <- data.frame(HGB = as.numeric(hgb_values_raw),
-                                                        Age = as.numeric(age_values_raw),
-                                                        original_row_index = 1:nrow(full_original_data),
-                                                        age_group_label = full_original_data$age_group_label_for_gmm) # Carry over labels
+      combined_clustered_data <- tibble()
+      male_hgb_transformed_flag <- FALSE
+      female_hgb_transformed_flag <- FALSE
+      male_gmm_model <- NULL
+      female_gmm_model <- NULL
 
-
-        # Omit rows where either HGB or Age values are NA (after coercion)
-        combined_data_for_mclust_cleaned <- na.omit(temp_data_with_labels_for_mclust)
-
-        # Separate the data used for Mclust from the labels for later use
-        data_for_mclust <- combined_data_for_mclust_cleaned %>%
-          select(HGB, Age)
-
-        # Get the corresponding age_group_labels for the data used in Mclust
-        age_group_labels_for_clustered_data <- combined_data_for_mclust_cleaned$age_group_label
-
-
-        print(paste("DEBUG: Combined data for GMM prepared. Dimensions:", paste(dim(data_for_mclust), collapse = "x")))
-
-        if (nrow(data_for_mclust) < 2) {
-            stop("Not enough valid data points (HGB and Age) for subpopulation detection after removing missing values.")
-        }
-        if (!all(sapply(data_for_mclust, is.numeric))) {
-            stop("Combined HGB and Age data must be entirely numeric.")
-        }
-
-        # --- Pass combined data and G range for Mclust to choose optimal G ---
-        print(paste("DEBUG: Calling run_gmm with G range 2:5 for automatic selection."))
-        gmm_model_result <- run_gmm(data_for_mclust, G_range = 2:5) # No input$gmm_n_components here
-        print("DEBUG: run_gmm call completed. Optimal G selected by Mclust is:")
-        print(gmm_model_result$G)
-
-        print("DEBUG: Calling assign_clusters.")
-        clustered_df_result <- assign_clusters(data_for_mclust, gmm_model_result)
-        # Add the age_group_label back to the clustered_df_result
-        clustered_df_result$age_group_label <- age_group_labels_for_clustered_data
-        print("DEBUG: assign_clusters call completed and age_group_label added.")
-
-        # --- DYNAMIC RENDERING OF RESULTS ---
-        output$gmm_results_ui <- renderUI({
-          num_clusters <- gmm_model_result$G
-          tagList(
-            h4(paste0("Subpopulation Plot (Detected ", num_clusters, " Clusters)")),
-            plotOutput("gmm_plot", height = "400px"),
-            h4(paste0("Subpopulation Characteristics (", num_clusters, " Clusters)")),
-            verbatimTextOutput("gmm_summary")
-          )
+      if (nrow(male_data) > 0) {
+        yj_result_male <- apply_conditional_yeo_johnson(male_data$HGB)
+        male_data$HGB_transformed <- yj_result_male$transformed_data
+        male_hgb_transformed_flag <- yj_result_male$transformation_applied
+        male_data$HGB_z <- z_transform(male_data$HGB_transformed)
+        male_data$Age_z <- z_transform(male_data$Age)
+        incProgress(0.2, detail = "Running GMM for Male data...")
+        tryCatch({
+          male_gmm_model <- run_gmm(male_data %>% dplyr::select(HGB = HGB_z, Age = Age_z))
+          male_data <- assign_clusters(male_data, male_gmm_model)
+          male_data$cluster <- as.factor(male_data$cluster)
+        }, error = function(e) {
+          message_rv(list(text = paste("Error running GMM for male data:", e$message), type = "error"))
         })
+        combined_clustered_data <- bind_rows(combined_clustered_data, male_data %>% dplyr::select(HGB, Age, Gender, cluster))
+      }
 
-        output$gmm_plot <- renderPlot({
-          plot_age_hgb(df = clustered_df_result, age = "Age", hgb = "HGB")
+      if (nrow(female_data) > 0) {
+        yj_result_female <- apply_conditional_yeo_johnson(female_data$HGB)
+        female_data$HGB_transformed <- yj_result_female$transformed_data
+        female_hgb_transformed_flag <- yj_result_female$transformation_applied
+        female_data$HGB_z <- z_transform(female_data$HGB_transformed)
+        female_data$Age_z <- z_transform(female_data$Age)
+        incProgress(0.2, detail = "Running GMM for Female data...")
+        tryCatch({
+          female_gmm_model <- run_gmm(female_data %>% dplyr::select(HGB = HGB_z, Age = Age_z))
+          female_data <- assign_clusters(female_data, female_gmm_model)
+          female_data$cluster <- as.factor(female_data$cluster)
+        }, error = function(e) {
+          message_rv(list(text = paste("Error running GMM for female data:", e$message), type = "error"))
         })
+        combined_clustered_data <- bind_rows(combined_clustered_data, female_data %>% dplyr::select(HGB, Age, Gender, cluster))
+      }
+      
+      gmm_models_rv(list(male = male_gmm_model, female = female_gmm_model))
+      gmm_transformation_details_rv(list(male_hgb_transformed = male_hgb_transformed_flag, female_hgb_transformed = female_hgb_transformed_flag))
 
-        output$gmm_summary <- renderPrint({
-          print(summary(gmm_model_result))
+      if (nrow(combined_clustered_data) > 0) {
+        gmm_processed_data_rv(combined_clustered_data)
+        message_rv(list(text = "GMM analysis complete!", type = "success"))
+      } else {
+        message_rv(list(text = "No data available after GMM processing for plotting/summary.", type = "error"))
+        gmm_processed_data_rv(NULL)
+      }
 
-          cat("\n--- Detailed Subpopulation Characteristics ---\n")
-          num_clusters <- gmm_model_result$G
-          
-          # Use dplyr for a nice summary table of cluster counts by age group
-          if ("age_group_label" %in% colnames(clustered_df_result)) {
-            summary_by_age_group <- clustered_df_result %>%
-              group_by(cluster, age_group_label) %>%
-              summarise(count = n(), .groups = 'drop') %>%
-              pivot_wider(names_from = age_group_label, values_from = count, values_fill = 0)
-            
-            cat("\nCluster Counts by Age Group:\n")
-            print(summary_by_age_group)
-            cat("\n")
-          } else {
-            cat("\n(Age group labels not available in summary due to missing 'age_group_label' column in clustered data.)\n")
-          }
+      incProgress(0.1, detail = "Generating plots and summaries...")
+    })
 
+    analysis_running_rv(FALSE)
+    shinyjs::enable("tabs")
+  })
 
-          for (i in 1:num_clusters) {
+  observeEvent(input$reset_gmm_analysis_btn, {
+    gmm_uploaded_data_rv(NULL)
+    gmm_processed_data_rv(NULL)
+    gmm_transformation_details_rv(list(male_hgb_transformed = FALSE, female_hgb_transformed = FALSE))
+    gmm_models_rv(list(male = NULL, female = NULL))
+    shinyjs::reset("gmm_file_upload")
+    output$gmm_results_ui <- renderUI(NULL)
+    message_rv(list(text = "GMM data and results reset.", type = "info"))
+  })
+
+  output$gmm_results_ui <- renderUI({
+    plot_data <- gmm_processed_data_rv()
+    if (is.null(plot_data) || nrow(plot_data) == 0) {
+      return(NULL)
+    }
+
+    tagList(
+      div(class = "output-box",
+          h4("Subpopulation Plot"),
+          plotOutput("plot_output_gmm", height = "600px")),
+      div(class = "output-box",
+          h4("GMM Summary"),
+          verbatimTextOutput("gmm_summary_output")),
+      div(class = "output-box",
+          h4("Cluster Age Group Summary"),
+          tableOutput("gmm_age_group_summary_output"))
+    )
+  })
+
+  output$plot_output_gmm <- renderPlot({
+    plot_data <- gmm_processed_data_rv()
+    if (is.null(plot_data) || nrow(plot_data) == 0) {
+      return(ggplot() + annotate("text", x = 0.5, y = 0.5, label = "No GMM data available for plotting.", size = 6, color = "grey50"))
+    }
+    plot_age_hgb(plot_data,
+                 male_hgb_transformed = gmm_transformation_details_rv()$male_hgb_transformed,
+                 female_hgb_transformed = gmm_transformation_details_rv()$female_hgb_transformed)
+  })
+
+  output$gmm_summary_output <- renderPrint({
+    plot_data <- gmm_processed_data_rv()
+    models <- gmm_models_rv()
+    
+    if (is.null(plot_data) || nrow(plot_data) == 0) {
+      return("No GMM analysis results to display.")
+    }
+
+    cat("--- GMM Analysis Summary ---\n")
+    
+    # Process Male data
+    if (!is.null(models$male) && !inherits(models$male, "try-error")) {
+        cat("\n--- Male Subpopulations ---\n")
+        num_clusters <- models$male$G
+        for (i in 1:num_clusters) {
             cat(paste0("Cluster ", i, ":\n"))
-            cat(paste0("  Proportion (Size): ", round(gmm_model_result$parameters$pro[i], 3), "\n"))
-            cat(paste0("  Mean HGB: ", round(gmm_model_result$parameters$mean["HGB", i], 3), "\n"))
-            cat(paste0("  Mean Age: ", round(gmm_model_result$parameters$mean["Age", i], 3), "\n"))
+            cat(paste0("  Proportion: ", round(models$male$parameters$pro[i], 3), "\n"))
             
-            # --- FIX: Accessing variances from the 'sigma' 3D array for multivariate models ---
-            # gmm_model_result$parameters$variance$sigma is a 3D array: [row_var, col_var, cluster_index]
-            cluster_covariance_matrix <- gmm_model_result$parameters$variance$sigma[,,i]
+            # Use the original (untransformed, un-z-scored) means and sds for display
+            male_cluster_data <- plot_data %>% filter(Gender == "Male", cluster == i)
+            mean_hgb <- mean(male_cluster_data$HGB, na.rm = TRUE)
+            mean_age <- mean(male_cluster_data$Age, na.rm = TRUE)
+            sd_hgb <- sd(male_cluster_data$HGB, na.rm = TRUE)
+            sd_age <- sd(male_cluster_data$Age, na.rm = TRUE)
             
-            hgb_variance_val <- NA
-            age_variance_val <- NA
-
-            if (!is.null(cluster_covariance_matrix) && is.matrix(cluster_covariance_matrix) && all(c("HGB", "Age") %in% colnames(cluster_covariance_matrix))) {
-                hgb_variance_val <- cluster_covariance_matrix["HGB", "HGB"]
-                age_variance_val <- cluster_covariance_matrix["Age", "Age"]
-            } else {
-                warning(paste0("Variance matrix for Cluster ", i, " is problematic or missing HGB/Age columns. (Model: ", gmm_model_result$modelName, ")"))
-            }
-
-            sd_hgb <- NA # Default to NA
-            if (is.numeric(hgb_variance_val) && !is.na(hgb_variance_val) && hgb_variance_val >= 0) {
-              sd_hgb <- sqrt(hgb_variance_val)
-            } else {
-              warning(paste0("HGB variance for Cluster ", i, " is problematic or negative: ", hgb_variance_val))
-            }
-
-            sd_age <- NA # Default to NA
-            if (is.numeric(age_variance_val) && !is.na(age_variance_val) && age_variance_val >= 0) {
-              sd_age <- sqrt(age_variance_val)
-            } else {
-              warning(paste0("Age variance for Cluster ", i, " is problematic or negative: ", age_variance_val))
-            }
-
-            cat(paste0("  Std Dev HGB: ", ifelse(is.na(sd_hgb), "N/A", round(sd_hgb, 3)), "\n")) # Print N/A if sd_hgb is NA
-            cat(paste0("  Std Dev Age: ", ifelse(is.na(sd_age), "N/A", round(sd_age, 3)), "\n")) # Print N/A if sd_age is NA
+            cat(paste0("  Mean HGB: ", round(mean_hgb, 3), "\n"))
+            cat(paste0("  Mean Age: ", round(mean_age, 3), "\n"))
+            cat(paste0("  Std Dev HGB: ", round(sd_hgb, 3), "\n"))
+            cat(paste0("  Std Dev Age: ", round(sd_age, 3), "\n"))
             
-            # --- Estimated Age Range for the cluster ---
+            # Estimated age range
             if (!is.na(sd_age)) {
-              lower_age <- round(gmm_model_result$parameters$mean["Age", i] - 2 * sd_age, 1)
-              upper_age <- round(gmm_model_result$parameters$mean["Age", i] + 2 * sd_age, 1)
-              cat(paste0("  Estimated Age Range (Mean +/- 2SD): [", max(0, lower_age), " to ", max(0, upper_age), "] years\n")) # Cap lower bound at 0
+              lower_age <- round(mean_age - 2 * sd_age, 1)
+              upper_age <- round(mean_age + 2 * sd_age, 1)
+              cat(paste0("  Estimated Age Range (Mean +/- 2SD): [", max(0, lower_age), " to ", upper_age, "] years\n"))
             } else {
               cat("  Estimated Age Range: N/A (Std Dev Age problematic)\n")
             }
             cat("\n")
-          }
-        })
-
-        message_rv(list(text = paste0("Subpopulation detection complete! Detected ", gmm_model_result$G, " clusters."), type = "success"))
-        print("DEBUG: GMM analysis complete message sent.")
-
-      }, error = function(e) {
-        message_rv(list(text = paste("Error during subpopulation detection:", e$message), type = "danger"))
-        print(paste("DEBUG ERROR: Error during GMM analysis:", e$message))
-        output$gmm_results_ui <- renderUI({ tagList() }) # Clear previous dynamic UI results on error
-      }, finally = {
-        analysis_running(FALSE)
-        print("DEBUG: GMM analysis finally block executed.")
-      })
-    } else if (input$tabs != "Subpopulation Detection (GMM)") {
-      message_rv(list(text = "Please switch to the 'Subpopulation Detection (GMM)' tab to run this analysis.", type = "warning"))
-      print("DEBUG: GMM analysis blocked: Not on correct Tab.")
-    }
-  })
-
-  # Observer for "Reset GMM Data" button
-  observeEvent(input$reset_gmm_btn, {
-    print("DEBUG: reset_gmm_btn observer triggered.")
-    if (!analysis_running()) {
-      gmm_data_reactive(NULL)
-      updateSelectInput(session, "gmm_col_value", choices = c("None" = ""), selected = "")
-      updateSelectInput(session, "gmm_col_age", choices = c("None" = ""), selected = "")
-      output$gmm_results_ui <- renderUI({ tagList() })
-      shinyjs::reset("gmm_data_file")
-      message_rv(list(text = "GMM data and results reset.", type = "info"))
-      print("DEBUG: GMM data and results reset.")
+        }
     } else {
-      message_rv(list(text = "Cannot reset GMM data while Main Analysis is running. Please wait or reset Main Analysis first.", type = "warning"))
-      print("DEBUG: GMM reset blocked by main analysis.")
+        cat("No male subpopulations detected.\n")
+    }
+    
+    # Process Female data
+    if (!is.null(models$female) && !inherits(models$female, "try-error")) {
+        cat("\n--- Female Subpopulations ---\n")
+        num_clusters <- models$female$G
+        for (i in 1:num_clusters) {
+            cat(paste0("Cluster ", i, ":\n"))
+            cat(paste0("  Proportion: ", round(models$female$parameters$pro[i], 3), "\n"))
+            
+            # Use the original (untransformed, un-z-scored) means and sds for display
+            female_cluster_data <- plot_data %>% filter(Gender == "Female", cluster == i)
+            mean_hgb <- mean(female_cluster_data$HGB, na.rm = TRUE)
+            mean_age <- mean(female_cluster_data$Age, na.rm = TRUE)
+            sd_hgb <- sd(female_cluster_data$HGB, na.rm = TRUE)
+            sd_age <- sd(female_cluster_data$Age, na.rm = TRUE)
+            
+            cat(paste0("  Mean HGB: ", round(mean_hgb, 3), "\n"))
+            cat(paste0("  Mean Age: ", round(mean_age, 3), "\n"))
+            cat(paste0("  Std Dev HGB: ", round(sd_hgb, 3), "\n"))
+            cat(paste0("  Std Dev Age: ", round(sd_age, 3), "\n"))
+            
+            # Estimated age range
+            if (!is.na(sd_age)) {
+              lower_age <- round(mean_age - 2 * sd_age, 1)
+              upper_age <- round(mean_age + 2 * sd_age, 1)
+              cat(paste0("  Estimated Age Range (Mean +/- 2SD): [", max(0, lower_age), " to ", upper_age, "] years\n"))
+            } else {
+              cat("  Estimated Age Range: N/A (Std Dev Age problematic)\n")
+            }
+            cat("\n")
+        }
+    } else {
+        cat("No female subpopulations detected.\n")
+    }
+
+    if (gmm_transformation_details_rv()$male_hgb_transformed || gmm_transformation_details_rv()$female_hgb_transformed) {
+      cat("\nNote: HGB values were transformed (Yeo-Johnson) for GMM input due to skewness. Reported HGB values are original.\n")
     }
   })
+
+  output$gmm_age_group_summary_output <- renderTable({
+    plot_data <- gmm_processed_data_rv()
+    if (is.null(plot_data) || nrow(plot_data) == 0) {
+      return(NULL)
+    }
+
+    age_bins <- c(0, 10, 20, 30, 40, 50, 60, 70, 80, Inf)
+    age_labels <- c("<10", "10-19", "20-29", "30-39", "40-49", "50-59", "60-69", "70-79", "80+")
+
+    plot_data %>%
+      mutate(age_group_label = cut(Age, breaks = age_bins, labels = age_labels, right = FALSE)) %>%
+      group_by(Gender, age_group_label, cluster) %>%
+      summarise(Count = n(), .groups = 'drop') %>%
+      pivot_wider(names_from = cluster, values_from = Count, values_fill = 0)
+  }, rownames = FALSE)
+}

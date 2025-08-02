@@ -1,4 +1,4 @@
-# R/server_main.R
+# server_main.R
 
 mainServer <- function(input, output, session, data_reactive, selected_dir_reactive, message_rv, analysis_running_rv) {
 
