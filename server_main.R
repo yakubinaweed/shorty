@@ -4,6 +4,8 @@ mainServer <- function(input, output, session, data_reactive, selected_dir_react
 
   # Reactive value to hold the refineR model result
   refiner_model_rv <- reactiveVal(NULL)
+  # Reactive value to hold the plot title
+  plot_title_rv <- reactiveVal("")
 
   # Observer for file upload: reads the uploaded Excel file
   observeEvent(input$data_file, {
@@ -40,6 +42,7 @@ mainServer <- function(input, output, session, data_reactive, selected_dir_react
     shinyjs::reset("data_file")
     data_reactive(NULL)
     refiner_model_rv(NULL) # Reset the model
+    plot_title_rv("") # Reset the title
     message_rv(list(type = "", text = ""))
     output$result_text <- renderPrint({ cat("") })
     output$result_plot <- renderPlot(plot.new())
@@ -127,21 +130,20 @@ mainServer <- function(input, output, session, data_reactive, selected_dir_react
       }
       
       refiner_model_rv(refiner_model)
+      plot_title_rv(paste0("Estimated Reference Intervals for ", isolated_inputs$col_value, 
+                           " (Gender: ", isolated_inputs$gender_choice, 
+                           ", Age: ", isolated_inputs$age_range[1], "-", isolated_inputs$age_range[2], ")"))
       
       output$result_text <- renderPrint({
         print(refiner_model)
       })
 
       if (isolated_inputs$enable_directory && !is.null(selected_dir_reactive())) {
-        plot_title <- paste0("Estimated Reference Intervals for ", isolated_inputs$col_value, 
-                           " (Gender: ", isolated_inputs$gender_choice, 
-                           ", Age: ", isolated_inputs$age_range[1], "-", isolated_inputs$age_range[2], ")")
-
         filename <- generate_safe_filename("RefineR_Plot", selected_dir_reactive(), "png")
         png(filename, width = 800, height = 600)
         
         plot(refiner_model, showCI = TRUE, RIperc = c(0.025, 0.975), showPathol = FALSE,
-             title = plot_title,
+             title = plot_title_rv(),
              xlab = sprintf("%s [%s]", isolated_inputs$col_value, isolated_inputs$unit_input))
 
         usr <- par("usr")
@@ -186,13 +188,11 @@ mainServer <- function(input, output, session, data_reactive, selected_dir_react
   # Live-updating plot output that depends on reactive inputs
   output$result_plot <- renderPlot({
     refiner_model <- refiner_model_rv()
-    filtered_data <- filtered_data_reactive()
-    req(refiner_model, filtered_data)
+    # Require the model to be present before plotting
+    req(refiner_model)
 
-    plot_title <- paste0("Estimated Reference Intervals for ", input$col_value, 
-                         " (Gender: ", input$gender_choice, 
-                         ", Age: ", input$age_range[1], "-", input$age_range[2], ")")
-
+    plot_title <- plot_title_rv()
+    
     plot(refiner_model, showCI = TRUE, RIperc = c(0.025, 0.975), showPathol = FALSE,
          title = plot_title,
          xlab = sprintf("%s [%s]", input$col_value, input$unit_input))
