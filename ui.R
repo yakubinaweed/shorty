@@ -72,17 +72,20 @@ ui <- navbarPage(
     useShinyjs(),
     h4("Detect Subpopulations using HGB and Age"),
     p("Gaussian Mixture Models aim to detect hidden subpopulations within your data based on HGB and Age. The system will automatically select the best number of components (between 2 and 5) using the Bayesian Information Criterion (BIC), where the lowest BIC value indicates the optimal fit. For each detected subpopulation, estimated age ranges will be provided directly from the model's characteristics, avoiding predefined bins. While increasing the number of components can improve model fit, it also increases the risk of overfitting, where the model learns noise rather than true underlying patterns."),
-    fluidRow(
-      column(4,
-             fileInput(inputId = "gmm_file_upload", label = "Upload Data (Excel File)", accept = c(".xlsx")),
-             uiOutput("gmm_hgb_col_selector"),
-             uiOutput("gmm_age_col_selector"),
-             uiOutput("gmm_gender_col_selector"),
-             actionButton("run_gmm_analysis_btn", "Run Subpopulation Detection", class = "btn-primary"),
-             actionButton("reset_gmm_analysis_btn", "Reset GMM Data", class = "btn-secondary")
+    sidebarLayout(
+      sidebarPanel(
+        fileInput(inputId = "gmm_file_upload", label = "Upload Data (Excel File)", accept = c(".xlsx")),
+        hr(),
+        selectInput(inputId = "gmm_hgb_col", label = "Select HGB Column:", choices = c("None" = ""), selected = ""),
+        selectInput(inputId = "gmm_age_col", label = "Select Age Column:", choices = c("None" = ""), selected = ""),
+        selectInput(inputId = "gmm_gender_col", label = "Select Gender Column:", choices = c("None" = ""), selected = ""),
+        hr(),
+        actionButton("run_gmm_analysis_btn", "Run Subpopulation Detection", class = "btn-primary"),
+        actionButton("reset_gmm_analysis_btn", "Reset GMM Data", class = "btn-secondary"),
+        uiOutput("app_message")
       ),
-      column(8,
-             uiOutput("gmm_results_ui")
+      mainPanel(
+        uiOutput("gmm_results_ui")
       )
     )
   ),

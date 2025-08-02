@@ -9,32 +9,28 @@ gmmServer <- function(input, output, session, gmm_uploaded_data_rv, gmm_processe
       data <- readxl::read_excel(input$gmm_file_upload$datapath)
       gmm_uploaded_data_rv(data)
       message_rv(list(text = "GMM data uploaded successfully.", type = "success"))
+
+      col_names <- colnames(data)
+      all_col_choices_with_none <- c("None" = "", col_names)
+      
+      guess_column <- function(cols_available, common_names) {
+        for (name in common_names) {
+          match_idx <- grep(paste0("^", name, "$"), cols_available, ignore.case = TRUE)
+          if (length(match_idx) > 0) {
+            return(cols_available[match_idx[1]])
+          }
+        }
+        return("")
+      }
+
+      updateSelectInput(session, "gmm_hgb_col", choices = all_col_choices_with_none, selected = guess_column(col_names, c("HGB", "hgb", "HB", "hb")))
+      updateSelectInput(session, "gmm_age_col", choices = all_col_choices_with_none, selected = guess_column(col_names, c("Age", "age", "leeftijd")))
+      updateSelectInput(session, "gmm_gender_col", choices = all_col_choices_with_none, selected = guess_column(col_names, c("Gender", "gender", "Sex", "sex", "geslacht")))
+      
     }, error = function(e) {
       message_rv(list(text = paste("Error reading GMM file:", e$message), type = "error"))
       gmm_uploaded_data_rv(NULL)
     })
-  })
-
-  # Dynamic UI for GMM column selectors
-  output$gmm_hgb_col_selector <- renderUI({
-    data <- gmm_uploaded_data_rv()
-    if (is.null(data)) return(NULL)
-    selectInput("gmm_hgb_col", "Select HGB Column:", choices = names(data),
-                selected = c("HGB", "hgb", "HB", "hb")[c("HGB", "hgb", "HB", "hb") %in% names(data)][1])
-  })
-
-  output$gmm_age_col_selector <- renderUI({
-    data <- gmm_uploaded_data_rv()
-    if (is.null(data)) return(NULL)
-    selectInput("gmm_age_col", "Select Age Column:", choices = names(data),
-                selected = c("Age", "age")[c("Age", "age") %in% names(data)][1])
-  })
-
-  output$gmm_gender_col_selector <- renderUI({
-    data <- gmm_uploaded_data_rv()
-    if (is.null(data)) return(NULL)
-    selectInput("gmm_gender_col", "Select Gender Column:", choices = names(data),
-                selected = c("Gender", "gender", "Sex", "sex")[c("Gender", "gender", "Sex", "sex") %in% names(data)][1])
   })
 
   # Observer for GMM analysis button
@@ -154,6 +150,11 @@ gmmServer <- function(input, output, session, gmm_uploaded_data_rv, gmm_processe
     shinyjs::reset("gmm_file_upload")
     output$gmm_results_ui <- renderUI(NULL)
     message_rv(list(text = "GMM data and results reset.", type = "info"))
+    
+    # Reset column selectors
+    updateSelectInput(session, "gmm_hgb_col", choices = c("None" = ""), selected = "")
+    updateSelectInput(session, "gmm_age_col", choices = c("None" = ""), selected = "")
+    updateSelectInput(session, "gmm_gender_col", choices = c("None" = ""), selected = "")
   })
 
   output$gmm_results_ui <- renderUI({
@@ -195,7 +196,6 @@ gmmServer <- function(input, output, session, gmm_uploaded_data_rv, gmm_processe
 
     cat("--- GMM Analysis Summary ---\n")
     
-    # Process Male data
     if (!is.null(models$male) && !inherits(models$male, "try-error")) {
         cat("\n--- Male Subpopulations ---\n")
         num_clusters <- models$male$G
@@ -203,7 +203,6 @@ gmmServer <- function(input, output, session, gmm_uploaded_data_rv, gmm_processe
             cat(paste0("Cluster ", i, ":\n"))
             cat(paste0("  Proportion: ", round(models$male$parameters$pro[i], 3), "\n"))
             
-            # Use the original (untransformed, un-z-scored) means and sds for display
             male_cluster_data <- plot_data %>% filter(Gender == "Male", cluster == i)
             mean_hgb <- mean(male_cluster_data$HGB, na.rm = TRUE)
             mean_age <- mean(male_cluster_data$Age, na.rm = TRUE)
@@ -215,7 +214,6 @@ gmmServer <- function(input, output, session, gmm_uploaded_data_rv, gmm_processe
             cat(paste0("  Std Dev HGB: ", round(sd_hgb, 3), "\n"))
             cat(paste0("  Std Dev Age: ", round(sd_age, 3), "\n"))
             
-            # Estimated age range
             if (!is.na(sd_age)) {
               lower_age <- round(mean_age - 2 * sd_age, 1)
               upper_age <- round(mean_age + 2 * sd_age, 1)
@@ -229,7 +227,6 @@ gmmServer <- function(input, output, session, gmm_uploaded_data_rv, gmm_processe
         cat("No male subpopulations detected.\n")
     }
     
-    # Process Female data
     if (!is.null(models$female) && !inherits(models$female, "try-error")) {
         cat("\n--- Female Subpopulations ---\n")
         num_clusters <- models$female$G
@@ -237,7 +234,6 @@ gmmServer <- function(input, output, session, gmm_uploaded_data_rv, gmm_processe
             cat(paste0("Cluster ", i, ":\n"))
             cat(paste0("  Proportion: ", round(models$female$parameters$pro[i], 3), "\n"))
             
-            # Use the original (untransformed, un-z-scored) means and sds for display
             female_cluster_data <- plot_data %>% filter(Gender == "Female", cluster == i)
             mean_hgb <- mean(female_cluster_data$HGB, na.rm = TRUE)
             mean_age <- mean(female_cluster_data$Age, na.rm = TRUE)
@@ -249,7 +245,6 @@ gmmServer <- function(input, output, session, gmm_uploaded_data_rv, gmm_processe
             cat(paste0("  Std Dev HGB: ", round(sd_hgb, 3), "\n"))
             cat(paste0("  Std Dev Age: ", round(sd_age, 3), "\n"))
             
-            # Estimated age range
             if (!is.na(sd_age)) {
               lower_age <- round(mean_age - 2 * sd_age, 1)
               upper_age <- round(mean_age + 2 * sd_age, 1)
