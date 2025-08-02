@@ -20,11 +20,12 @@ source("utils.R")
 server <- function(input, output, session) {
   
   # --- Reactive Values for State Management ---
+  # Centralized location for all state variables.
   data_reactive <- reactiveVal(NULL)
   gmm_uploaded_data_rv <- reactiveVal(NULL)
   gmm_processed_data_rv <- reactiveVal(NULL)
   gmm_transformation_details_rv <- reactiveVal(list(male_hgb_transformed = FALSE, female_hgb_transformed = FALSE))
-  gmm_models_rv <- reactiveVal(list(male = NULL, female = NULL)) # Reactive for storing GMM models
+  gmm_models_rv <- reactiveVal(list(male = NULL, female = NULL))
   selected_dir_reactive <- reactiveVal(NULL)
   message_rv <- reactiveVal(list(type = "", text = ""))
   analysis_running_rv <- reactiveVal(FALSE)
@@ -353,9 +354,7 @@ server <- function(input, output, session) {
         combined_clustered_data <- bind_rows(combined_clustered_data, female_data %>% dplyr::select(HGB, Age, Gender, cluster))
       }
       
-      # Store the models in the new reactive value
       gmm_models_rv(list(male = male_gmm_model, female = female_gmm_model))
-
       gmm_transformation_details_rv(list(male_hgb_transformed = male_hgb_transformed_flag, female_hgb_transformed = female_hgb_transformed_flag))
 
       if (nrow(combined_clustered_data) > 0) {
@@ -377,7 +376,7 @@ server <- function(input, output, session) {
     gmm_uploaded_data_rv(NULL)
     gmm_processed_data_rv(NULL)
     gmm_transformation_details_rv(list(male_hgb_transformed = FALSE, female_hgb_transformed = FALSE))
-    gmm_models_rv(list(male = NULL, female = NULL)) # Reset the models
+    gmm_models_rv(list(male = NULL, female = NULL))
     shinyjs::reset("gmm_file_upload")
     output$gmm_results_ui <- renderUI(NULL)
     message_rv(list(text = "GMM data and results reset.", type = "info"))
