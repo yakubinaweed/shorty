@@ -89,6 +89,8 @@ gmmServer <- function(input, output, session, gmm_uploaded_data_rv, gmm_processe
       female_hgb_transformed_flag <- FALSE
       male_gmm_model <- NULL
       female_gmm_model <- NULL
+      
+      model_criterion <- isolate(input$gmm_model_criterion)
 
       if (nrow(male_data) > 0) {
         yj_result_male <- apply_conditional_yeo_johnson(male_data$HGB)
@@ -98,13 +100,18 @@ gmmServer <- function(input, output, session, gmm_uploaded_data_rv, gmm_processe
         male_data$Age_z <- z_transform(male_data$Age)
         incProgress(0.2, detail = "Running GMM for Male data...")
         tryCatch({
-          male_gmm_model <- run_gmm(male_data %>% dplyr::select(HGB = HGB_z, Age = Age_z))
-          male_data <- assign_clusters(male_data, male_gmm_model)
-          male_data$cluster <- as.factor(male_data$cluster)
+          male_gmm_model <- run_gmm_with_criterion(male_data %>% dplyr::select(HGB = HGB_z, Age = Age_z), criterion = model_criterion)
+          if (!is.null(male_gmm_model)) {
+            male_data <- assign_clusters(male_data, male_gmm_model)
+            male_data$cluster <- as.factor(male_data$cluster)
+          }
         }, error = function(e) {
           message_rv(list(text = paste("Error running GMM for male data:", e$message), type = "error"))
         })
-        combined_clustered_data <- bind_rows(combined_clustered_data, male_data %>% dplyr::select(HGB, Age, Gender, cluster))
+        # Only combine if clusters were assigned
+        if (!is.null(male_gmm_model)) {
+          combined_clustered_data <- bind_rows(combined_clustered_data, male_data %>% dplyr::select(HGB, Age, Gender, cluster))
+        }
       }
 
       if (nrow(female_data) > 0) {
@@ -115,13 +122,18 @@ gmmServer <- function(input, output, session, gmm_uploaded_data_rv, gmm_processe
         female_data$Age_z <- z_transform(female_data$Age)
         incProgress(0.2, detail = "Running GMM for Female data...")
         tryCatch({
-          female_gmm_model <- run_gmm(female_data %>% dplyr::select(HGB = HGB_z, Age = Age_z))
-          female_data <- assign_clusters(female_data, female_gmm_model)
-          female_data$cluster <- as.factor(female_data$cluster)
+          female_gmm_model <- run_gmm_with_criterion(female_data %>% dplyr::select(HGB = HGB_z, Age = Age_z), criterion = model_criterion)
+          if (!is.null(female_gmm_model)) {
+            female_data <- assign_clusters(female_data, female_gmm_model)
+            female_data$cluster <- as.factor(female_data$cluster)
+          }
         }, error = function(e) {
           message_rv(list(text = paste("Error running GMM for female data:", e$message), type = "error"))
         })
-        combined_clustered_data <- bind_rows(combined_clustered_data, female_data %>% dplyr::select(HGB, Age, Gender, cluster))
+        # Only combine if clusters were assigned
+        if (!is.null(female_gmm_model)) {
+          combined_clustered_data <- bind_rows(combined_clustered_data, female_data %>% dplyr::select(HGB, Age, Gender, cluster))
+        }
       }
       
       gmm_models_rv(list(male = male_gmm_model, female = female_gmm_model))
@@ -165,6 +177,9 @@ gmmServer <- function(input, output, session, gmm_uploaded_data_rv, gmm_processe
 
     tagList(
       div(class = "output-box",
+          h4("Model Selection Plot"),
+          plotOutput("gmm_model_selection_plot", height = "400px")),
+      div(class = "output-box",
           h4("Subpopulation Plot"),
           plotOutput("plot_output_gmm", height = "600px")),
       div(class = "output-box",
@@ -174,6 +189,41 @@ gmmServer <- function(input, output, session, gmm_uploaded_data_rv, gmm_processe
           h4("Cluster Age Group Summary"),
           tableOutput("gmm_age_group_summary_output"))
     )
+  })
+
+  output$gmm_model_selection_plot <- renderPlot({
+    models <- gmm_models_rv()
+    if (is.null(models$male) && is.null(models$female)) {
+      return(ggplot() + annotate("text", x = 0.5, y = 0.5, label = "No GMM models available for plotting.", size = 6, color = "grey50"))
+    }
+    
+    criterion_selected <- isolate(input$gmm_model_criterion)
+    
+    if (!is.null(models$male) && !is.null(models$female)) {
+      par(mfrow = c(1, 2))
+      if (criterion_selected == "BIC") {
+        plot(models$male, what = "BIC", main = "Male - BIC Plot")
+        plot(models$female, what = "BIC", main = "Female - BIC Plot")
+      } else {
+        plot(mclustICL(models$male), main = "Male - ICL Plot")
+        plot(mclustICL(models$female), main = "Female - ICL Plot")
+      }
+      par(mfrow = c(1, 1))
+    } else {
+      if (!is.null(models$male)) {
+        if (criterion_selected == "BIC") {
+          plot(models$male, what = "BIC", main = "Male - BIC Plot")
+        } else {
+          plot(mclustICL(models$male), main = "Male - ICL Plot")
+        }
+      } else if (!is.null(models$female)) {
+        if (criterion_selected == "BIC") {
+          plot(models$female, what = "BIC", main = "Female - BIC Plot")
+        } else {
+          plot(mclustICL(models$female), main = "Female - ICL Plot")
+        }
+      }
+    }
   })
 
   output$plot_output_gmm <- renderPlot({
@@ -198,6 +248,9 @@ gmmServer <- function(input, output, session, gmm_uploaded_data_rv, gmm_processe
     
     if (!is.null(models$male) && !inherits(models$male, "try-error")) {
         cat("\n--- Male Subpopulations ---\n")
+        
+        print(summary(models$male))
+
         num_clusters <- models$male$G
         for (i in 1:num_clusters) {
             cat(paste0("Cluster ", i, ":\n"))
@@ -229,6 +282,9 @@ gmmServer <- function(input, output, session, gmm_uploaded_data_rv, gmm_processe
     
     if (!is.null(models$female) && !inherits(models$female, "try-error")) {
         cat("\n--- Female Subpopulations ---\n")
+        
+        print(summary(models$female))
+
         num_clusters <- models$female$G
         for (i in 1:num_clusters) {
             cat(paste0("Cluster ", i, ":\n"))

@@ -78,8 +78,8 @@ apply_conditional_yeo_johnson <- function(data_vector, skewness_threshold = 0.5)
   return(list(transformed_data = transformed_data, transformation_applied = transformation_applied))
 }
 
-# Function to run GMM analysis using mclust
-run_gmm <- function(data_mat, G_range = 2:5) {
+# Function to run GMM analysis using mclust with a selectable criterion
+run_gmm_with_criterion <- function(data_mat, G_range = 2:5, criterion = "BIC") {
   if (!is.matrix(data_mat) && !is.data.frame(data_mat)) {
     stop("Input data_mat must be a matrix or data frame for GMM analysis.")
   }
@@ -89,13 +89,36 @@ run_gmm <- function(data_mat, G_range = 2:5) {
   if (any(is.na(data_mat))) {
     stop("Input data_mat contains NA values. Please remove or impute before clustering.")
   }
-
-  multivariate_model_names <- c("EII", "VII", "EEE", "VEE")
+  
+  # Using the most common bivariate models
+  multivariate_model_names <- c("EII", "VII", "EEI", "VEI", "EVI", "VVI", "EEE", "EVE", "VEE", "VVV")
+  
   tryCatch({
-    gmm_model <- Mclust(data_mat, G = G_range, modelNames = multivariate_model_names)
-    return(gmm_model)
+    if (criterion == "BIC") {
+      gmm_model <- Mclust(data_mat, G = G_range, modelNames = multivariate_model_names)
+      return(gmm_model)
+    } else if (criterion == "ICL") {
+      mclust_all <- Mclust(data_mat, G = G_range, modelNames = multivariate_model_names, warn = FALSE)
+      if (is.null(mclust_all)) {
+        stop("Mclust could not be fitted to the data.")
+      }
+      icl_values <- mclustICL(mclust_all)
+      
+      best_model_index <- which.max(icl_values)
+      
+      best_G <- icl_values[best_model_index, "G"]
+      best_model_name <- rownames(icl_values)[best_model_index]
+
+      gmm_model <- Mclust(data_mat, G = best_G, modelNames = best_model_name)
+      return(gmm_model)
+
+    } else {
+      stop("Invalid criterion selected. Please choose 'BIC' or 'ICL'.")
+    }
   }, error = function(e) {
-    stop(paste("GMM Mclust Error:", e$message))
+    # Return NULL and a warning if the GMM fitting fails for any reason
+    warning(paste("GMM run failed:", e$message))
+    return(NULL)
   })
 }
 

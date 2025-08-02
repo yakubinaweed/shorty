@@ -80,6 +80,8 @@ ui <- navbarPage(
         selectInput(inputId = "gmm_age_col", label = "Select Age Column:", choices = c("None" = ""), selected = ""),
         selectInput(inputId = "gmm_gender_col", label = "Select Gender Column:", choices = c("None" = ""), selected = ""),
         hr(),
+        radioButtons(inputId = "gmm_model_criterion", label = "Select Model Selection Criterion:", choices = c("BIC", "ICL"), selected = "BIC", inline = TRUE),
+        hr(),
         actionButton("run_gmm_analysis_btn", "Run Subpopulation Detection", class = "btn-primary"),
         actionButton("reset_gmm_analysis_btn", "Reset GMM Data", class = "btn-secondary"),
         uiOutput("app_message")
