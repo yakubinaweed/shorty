@@ -1,5 +1,13 @@
 # R/utils.R
 
+# Load necessary libraries (ensure they are installed: install.packages("car"))
+# The car package contains the powerTransform function which implements Yeo-Johnson
+library(car) # For yeo_johnson_transform
+library(moments) # For skewness calculation
+library(ggplot2) # For plotting
+library(mclust) # For GMM analysis
+library(dplyr) # For data manipulation
+
 # Function to filter data based on gender and age
 filter_data <- function(data, gender_choice, age_min, age_max, col_gender, col_age) {
   if (!col_gender %in% names(data) || !col_age %in% names(data)) {

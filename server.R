@@ -1,151 +1,23 @@
-# R/server.R (Complete & Consolidated Script)
+# server.R
 
-# Load all necessary libraries
+# Load all necessary libraries.
+# All library calls should be here in the main server file.
 library(shiny)
 library(readxl)
-library(tidyverse) # Includes dplyr, ggplot2, tibble, etc.
-library(mclust) # For GMM analysis
-library(moments) # For skewness calculation
-library(shinyjs) # For UI manipulations
-library(car) # Required for powerTransform (Yeo-Johnson)
-library(refineR) # Explicitly load refineR here
+library(tidyverse)
+library(mclust)
+library(moments)
+library(shinyjs)
+library(car)
+library(refineR)
 library(shinyFiles)
 library(shinyWidgets)
 library(bslib)
+library(ggplot2)
 
+# Source utility functions
+source("utils.R")
 
-# =========================================================================
-# UTILITY FUNCTIONS
-# =========================================================================
-
-# Function to filter data based on gender and age
-filter_data <- function(data, gender_choice, age_min, age_max, col_gender, col_age) {
-  if (!col_gender %in% names(data) || !col_age %in% names(data)) {
-    stop("Gender or age column not found in data.")
-  }
-
-  filtered_data <- data %>%
-    filter(!!sym(col_age) >= age_min & !!sym(col_age) <= age_max)
-
-  if (gender_choice != "Both") {
-    filtered_data <- filtered_data %>%
-      filter(grepl(gender_choice, !!sym(col_gender), ignore.case = TRUE))
-  }
-
-  return(filtered_data)
-}
-
-# Function to generate a safe filename for plots
-generate_safe_filename <- function(plot_title, base_path, extension = "png") {
-  safe_title <- gsub("[^a-zA-Z0-9_-]", "_", plot_title)
-  datestamp <- format(Sys.Date(), "%Y%m%d")
-  timestamp <- format(Sys.time(), "%H%M%S")
-  file.path(base_path, paste0(safe_title, "_", datestamp, "-", timestamp, ".", extension))
-}
-
-# Z-transform a numeric vector (standardization)
-z_transform <- function(x) {
-  if (sd(x, na.rm = TRUE) == 0) {
-    return(rep(0, length(x)))
-  }
-  return((x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE))
-}
-
-# Conditional Yeo-Johnson Transformation
-apply_conditional_yeo_johnson <- function(data_vector, skewness_threshold = 0.5) {
-  transformed_data <- data_vector
-  transformation_applied <- FALSE
-  skew <- moments::skewness(data_vector, na.rm = TRUE)
-
-  if (abs(skew) > skewness_threshold) {
-    tryCatch({
-      pt_result <- powerTransform(data_vector)
-      lambda <- pt_result$lambda
-      transformed_data <- car::yjPower(data_vector, lambda)
-      transformation_applied <- TRUE
-      message(paste("Yeo-Johnson transformation applied (skewness=", round(skew, 2), ")"))
-    }, error = function(e) {
-      warning(paste("Could not apply Yeo-Johnson transformation:", e$message))
-    })
-  } else {
-    message(paste("Yeo-Johnson transformation not needed (skewness=", round(skew, 2), ")"))
-  }
-
-  return(list(transformed_data = transformed_data, transformation_applied = transformation_applied))
-}
-
-# Function to run GMM analysis using mclust
-run_gmm <- function(data_mat, G_range = 2:5) {
-  if (!is.matrix(data_mat) && !is.data.frame(data_mat)) {
-    stop("Input data_mat must be a matrix or data frame for GMM analysis.")
-  }
-  if (!all(sapply(data_mat, is.numeric))) {
-    stop("All columns in data_mat must be numeric.")
-  }
-  if (any(is.na(data_mat))) {
-    stop("Input data_mat contains NA values. Please remove or impute before clustering.")
-  }
-
-  multivariate_model_names <- c("EII", "VII", "EEE", "VEE")
-  tryCatch({
-    gmm_model <- Mclust(data_mat, G = G_range, modelNames = multivariate_model_names)
-    return(gmm_model)
-  }, error = function(e) {
-    stop(paste("GMM Mclust Error:", e$message))
-  })
-}
-
-# Function to assign clusters back to the original data frame
-assign_clusters <- function(df, gmm_model) {
-  if (is.null(gmm_model) || is.null(gmm_model$classification)) {
-    warning("GMM model or classification is NULL. Cannot assign clusters.")
-    return(df)
-  }
-  df$cluster <- gmm_model$classification
-  return(df)
-}
-
-# Function to plot age vs HGB colored by cluster
-plot_age_hgb <- function(df, male_hgb_transformed, female_hgb_transformed) {
-  if (is.null(df) || nrow(df) == 0) {
-    return(ggplot() + annotate("text", x = 0.5, y = 0.5, label = "No GMM data available for plotting.", size = 6, color = "grey50"))
-  }
-
-  plot_title <- "HGB vs Age by Subpopulation Cluster"
-  plot_subtitle <- ""
-  if (male_hgb_transformed) {
-    plot_subtitle <- paste(plot_subtitle, "Male HGB transformed for GMM.", sep="\n")
-  }
-  if (female_hgb_transformed) {
-    plot_subtitle <- paste(plot_subtitle, "Female HGB transformed for GMM.", sep="\n")
-  }
-
-  ggplot(df, aes(x = Age, y = HGB, color = factor(cluster))) +
-    geom_point(alpha = 0.7) +
-    facet_wrap(~Gender) +
-    theme_minimal() +
-    labs(title = plot_title,
-         subtitle = plot_subtitle,
-         x = "Age", y = "HGB", color = "Cluster") +
-    theme(legend.position = "bottom")
-}
-
-# Function to apply universal plausibility limits
-apply_universal_plausibility_limits <- function(data_df) {
-  filtered_data <- data_df %>%
-    filter(HGB >= 5 & HGB <= 20) %>% # Example HGB range
-    filter(Age >= 0) # Example non-negative age
-
-  if (nrow(filtered_data) < nrow(data_df)) {
-    warning(paste(nrow(data_df) - nrow(filtered_data), "rows removed due to plausibility limits."))
-  }
-  return(filtered_data)
-}
-
-
-# =========================================================================
-# MAIN SHINY SERVER LOGIC
-# =========================================================================
 server <- function(input, output, session) {
   
   # --- Reactive Values for State Management ---
@@ -163,7 +35,6 @@ server <- function(input, output, session) {
     if (is.null(msg) || msg$text == "") {
       return(NULL)
     }
-
     class_name <- switch(msg$type,
                          "error" = "alert alert-danger",
                          "success" = "alert alert-success",
@@ -174,12 +45,27 @@ server <- function(input, output, session) {
   })
 
   # --- Helper to clear messages ---
-  clear_messages <- function(message_rv) {
+  clear_messages <- function() {
     message_rv(list(type = "", text = ""))
   }
 
+  # --- Global Tab Switching Logic ---
+  observeEvent(input$tabs, {
+    if (!analysis_running_rv()) {
+      clear_messages()
+    } else {
+      message_rv(list(text = "Tab switch blocked: An analysis is currently running. Please wait or reset the analysis.", type = "warning"))
+    }
+  })
+
+  observeEvent(input$tab_switch_blocked, {
+    if (analysis_running_rv()) {
+      message_rv(list(text = "Cannot switch tabs while an analysis is running. Please wait or reset the analysis.", type = "warning"))
+    }
+  })
+
   # =========================================================================
-  # Main Analysis Tab (Window 1) Observers
+  # Main Analysis Tab Logic
   # =========================================================================
 
   # Observer for file upload: reads the uploaded Excel file
@@ -281,7 +167,6 @@ server <- function(input, output, session) {
     tryCatch({
       filtered_data <- filter_data(data_reactive(), isolated_inputs$gender_choice, isolated_inputs$age_range[1], isolated_inputs$age_range[2], isolated_inputs$col_gender, isolated_inputs$col_age)
       
-      # Check if filtered data is empty
       if (nrow(filtered_data) == 0) {
         stop("Filtered dataset is empty. Please adjust your filtering criteria.")
       }
@@ -290,7 +175,6 @@ server <- function(input, output, session) {
 
       refiner_model <- refineR::findRI(Data = filtered_data[[isolated_inputs$col_value]], NBootstrap = nbootstrap_value)
       
-      # Check if the model was successfully generated
       if (is.null(refiner_model) || inherits(refiner_model, "try-error")) {
         stop("RefineR model could not be generated. Check your input data and parameters.")
       }
@@ -332,7 +216,7 @@ server <- function(input, output, session) {
       message_rv(list(text = error_message, type = "danger"))
       output$result_text <- renderPrint({ cat(error_message) })
       output$result_plot <- renderPlot(plot.new())
-      print(error_message) # Print to console for debugging
+      print(error_message)
     }, finally = {
       analysis_running_rv(FALSE)
       session$sendCustomMessage('analysisStatus', FALSE)
@@ -340,7 +224,7 @@ server <- function(input, output, session) {
   })
 
   # =========================================================================
-  # Subpopulation Detection (GMM) Tab (Window 2) Observers
+  # Subpopulation Detection (GMM) Tab Logic
   # =========================================================================
 
   # Observer for GMM file upload
@@ -489,7 +373,7 @@ server <- function(input, output, session) {
     gmm_processed_data_rv(NULL)
     gmm_transformation_details_rv(list(male_hgb_transformed = FALSE, female_hgb_transformed = FALSE))
     shinyjs::reset("gmm_file_upload")
-    output$gmm_results_ui <- renderUI(NULL) # Clear the results UI
+    output$gmm_results_ui <- renderUI(NULL)
     message_rv(list(text = "GMM data and results reset.", type = "info"))
   })
 
@@ -528,13 +412,13 @@ server <- function(input, output, session) {
       return("No GMM analysis results to display.")
     }
 
-    gmm_model <- gmm_processed_data_rv()$gmm_model
-
-    cat("--- GMM Analysis Summary ---\n")
-    if (!is.null(gmm_model) && !inherits(gmm_model, "try-error")) {
-        print(summary(gmm_model))
-        cat("\n")
-    }
+    # This part of the code is not used.
+    # gmm_model <- gmm_processed_data_rv()$gmm_model
+    # cat("--- GMM Analysis Summary ---\n")
+    # if (!is.null(gmm_model) && !inherits(gmm_model, "try-error")) {
+    #     print(summary(gmm_model))
+    #     cat("\n")
+    # }
 
     male_summary <- plot_data %>%
       filter(Gender == "Male") %>%
@@ -598,5 +482,4 @@ server <- function(input, output, session) {
       summarise(Count = n(), .groups = 'drop') %>%
       pivot_wider(names_from = cluster, values_from = Count, values_fill = 0)
   }, rownames = FALSE)
-
 }

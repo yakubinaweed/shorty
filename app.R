@@ -1,6 +1,7 @@
 # app.R
 
-# Load necessary libraries
+# Load all necessary libraries.
+# This ensures all dependencies are met before the app runs.
 library(shiny)
 library(bslib)
 library(refineR)
@@ -9,7 +10,7 @@ library(moments)
 library(shinyjs)
 library(shinyWidgets)
 library(shinyFiles)
-library(tidyverse)
+library(tidyverse) # Includes dplyr, ggplot2, tibble, etc.
 library(mclust)
 library(car)
 

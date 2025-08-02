@@ -6,6 +6,7 @@ library(moments)
 library(shinyjs)
 library(shinyWidgets)
 library(shinyFiles)
+library(ggplot2)
 
 ui <- navbarPage(
   title = "RefineR Reference Interval Estimation",
@@ -82,12 +83,7 @@ ui <- navbarPage(
              actionButton("reset_gmm_analysis_btn", "Reset GMM Data", class = "btn-secondary")
       ),
       column(8,
-             h3("GMM Analysis Results"),
-             plotOutput("plot_output_gmm", height = "600px"),
-             h4("GMM Summary"),
-             verbatimTextOutput("gmm_summary_output"),
-             h4("Cluster Age Group Summary"),
-             tableOutput("gmm_age_group_summary_output")
+             uiOutput("gmm_results_ui")
       )
     )
   ),
