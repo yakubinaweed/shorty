@@ -1,3 +1,5 @@
+# ui.R
+
 library(shiny)
 library(bslib)
 library(refineR)
@@ -90,8 +92,6 @@ ui <- navbarPage(
         selectInput(inputId = "gmm_hgb_col", label = "Select HGB Column:", choices = c("None" = ""), selected = ""),
         selectInput(inputId = "gmm_age_col", label = "Select Age Column:", choices = c("None" = ""), selected = ""),
         selectInput(inputId = "gmm_gender_col", label = "Select Gender Column:", choices = c("None" = ""), selected = ""),
-        hr(),
-        radioButtons(inputId = "gmm_model_criterion", label = "Select Model Selection Criterion:", choices = c("BIC", "ICL"), selected = "BIC", inline = TRUE),
         hr(),
         # Action buttons for the GMM analysis
         actionButton("run_gmm_analysis_btn", "Run Subpopulation Detection", class = "btn-primary"),
