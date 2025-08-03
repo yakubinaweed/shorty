@@ -114,7 +114,7 @@ ui <- navbarPage(
 
   # Footer of the application with copyright and a link to the author's GitHub
   footer = tags$footer(
-    HTML('© 2025 <a href="https://github.com/yakubinaweed/refineR-reference-interval" target="_blank">Naweed Yakubi</a> • All rights reserved.'),
+    HTML('© 2025 <a href="https://github.com/yakubinaweed/" target="_blank">Naweed Yakubi</a> • All rights reserved.'),
     style = "
       position: relative;
       bottom: 0;
