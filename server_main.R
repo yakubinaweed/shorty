@@ -1,4 +1,52 @@
 # server_main.R
+# This module contains the logic for the "Main Analysis" tab.
+# It handles data upload, filtering, running the refineR model, and rendering the results.
+
+# =========================================================================
+# UTILITY FUNCTIONS FOR MAIN ANALYSIS
+# =========================================================================
+
+# Function to filter data based on gender and age
+# It takes a data frame, gender choice, age range, and column names for gender and age.
+# It returns a filtered data frame with a standardized 'Gender_Standardized' column.
+filter_data <- function(data, gender_choice, age_min, age_max, col_gender, col_age) {
+  if (!col_gender %in% names(data) || !col_age %in% names(data)) {
+    stop("Gender or age column not found in data.")
+  }
+
+  filtered_data <- data %>%
+    filter(!!sym(col_age) >= age_min & !!sym(col_age) <= age_max)
+  
+  filtered_data <- filtered_data %>%
+    mutate(Gender_Standardized = case_when(
+      grepl("male|m|man|jongen(s)?|heren|mannelijk(e)?", !!sym(col_gender), ignore.case = TRUE) ~ "Male",
+      grepl("female|f|vrouw(en)?|v|meisje(s)?|dame|mevr|vrouwelijke", !!sym(col_gender), ignore.case = TRUE) ~ "Female",
+      TRUE ~ "Other"
+    ))
+  
+  if (gender_choice != "Both") {
+    filtered_data <- filtered_data %>%
+      filter(Gender_Standardized == case_when(
+        gender_choice == "M" ~ "Male",
+        gender_choice == "F" ~ "Female"
+      ))
+  }
+
+  return(filtered_data)
+}
+
+# Function to generate a safe filename for plots
+# It creates a unique filename using a title, datestamp, and timestamp.
+generate_safe_filename <- function(plot_title, base_path, extension = "png") {
+  safe_title <- gsub("[^a-zA-Z0-9_-]", "_", plot_title)
+  datestamp <- format(Sys.Date(), "%Y%m%d")
+  timestamp <- format(Sys.time(), "%H%M%S")
+  file.path(base_path, paste0(safe_title, "_", datestamp, "-", timestamp, ".", extension))
+}
+
+# =========================================================================
+# MAIN SERVER LOGIC
+# =========================================================================
 
 mainServer <- function(input, output, session, data_reactive, selected_dir_reactive, message_rv, analysis_running_rv) {
 
@@ -7,7 +55,18 @@ mainServer <- function(input, output, session, data_reactive, selected_dir_react
   # Reactive value to hold the plot title
   plot_title_rv <- reactiveVal("")
 
-  # Observer for file upload: reads the uploaded Excel file
+  # Helper function to guess column names based on common keywords
+  guess_column <- function(cols_available, common_names) {
+    for (name in common_names) {
+      match_idx <- grep(paste0("^", name, "$"), cols_available, ignore.case = TRUE)
+      if (length(match_idx) > 0) {
+        return(cols_available[match_idx[1]])
+      }
+    }
+    return("")
+  }
+
+  # Observer for file upload: reads the uploaded Excel file and updates column selectors
   observeEvent(input$data_file, {
     req(input$data_file)
     tryCatch({
@@ -18,16 +77,7 @@ mainServer <- function(input, output, session, data_reactive, selected_dir_react
       col_names <- colnames(data)
       all_col_choices_with_none <- c("None" = "", col_names)
 
-      guess_column <- function(cols_available, common_names) {
-        for (name in common_names) {
-          match_idx <- grep(paste0("^", name, "$"), cols_available, ignore.case = TRUE)
-          if (length(match_idx) > 0) {
-            return(cols_available[match_idx[1]])
-          }
-        }
-        return("")
-      }
-
+      # Automatically select likely columns
       updateSelectInput(session, "col_value", choices = all_col_choices_with_none, selected = guess_column(col_names, c("HB_value", "Value", "Result", "Measurement", "Waarde")))
       updateSelectInput(session, "col_age", choices = all_col_choices_with_none, selected = guess_column(col_names, c("leeftijd", "age", "AgeInYears", "Years")))
       updateSelectInput(session, "col_gender", choices = all_col_choices_with_none, selected = guess_column(col_names, c("geslacht", "gender", "sex", "Gender", "Sex")))
@@ -39,6 +89,7 @@ mainServer <- function(input, output, session, data_reactive, selected_dir_react
 
   # Observer for the Reset button on the Main Analysis tab
   observeEvent(input$reset_btn, {
+    # Reset all inputs and outputs to their initial state
     shinyjs::reset("data_file")
     data_reactive(NULL)
     refiner_model_rv(NULL) # Reset the model
@@ -58,6 +109,7 @@ mainServer <- function(input, output, session, data_reactive, selected_dir_react
     roots = c(home = '~', wd = '.'), session = session
   )
 
+  # Updates the reactive value with the selected directory path
   observeEvent(input$select_dir_btn, {
     if (!is.integer(input$select_dir_btn)) {
       path <- shinyFiles::parseDirPath(c(home = '~', wd = '.'), input$select_dir_btn)
@@ -72,6 +124,7 @@ mainServer <- function(input, output, session, data_reactive, selected_dir_react
   })
   
   # Reactive expression for filtered data
+  # This filters the raw data based on user selections (gender and age range)
   filtered_data_reactive <- reactive({
     req(data_reactive(), input$col_value, input$col_age, input$col_gender)
     if (input$col_value == "" || input$col_age == "" || input$col_gender == "") {
@@ -81,6 +134,7 @@ mainServer <- function(input, output, session, data_reactive, selected_dir_react
   })
 
   # Observer for the Analyze button
+  # This is the core logic for the main analysis, running the refineR model
   observeEvent(input$analyze_btn, {
     if (analysis_running_rv()) {
       message_rv(list(text = "Analysis is already running. Please wait or reset.", type = "warning"))
@@ -103,6 +157,7 @@ mainServer <- function(input, output, session, data_reactive, selected_dir_react
     message_rv(list(text = "Analysis started...", type = "info"))
     session$sendCustomMessage('analysisStatus', TRUE)
 
+    # Isolate inputs to prevent re-running the analysis on every change
     isolated_inputs <- isolate({
       list(
         gender_choice = input$gender_choice,
@@ -123,6 +178,7 @@ mainServer <- function(input, output, session, data_reactive, selected_dir_react
     tryCatch({
       nbootstrap_value <- switch(isolated_inputs$nbootstrap_speed, "Fast" = 1, "Medium" = 50, "Slow" = 200, 1)
 
+      # Run the main RefineR function
       refiner_model <- refineR::findRI(Data = filtered_data[[isolated_inputs$col_value]], NBootstrap = nbootstrap_value)
       
       if (is.null(refiner_model) || inherits(refiner_model, "try-error")) {
@@ -134,10 +190,12 @@ mainServer <- function(input, output, session, data_reactive, selected_dir_react
                            " (Gender: ", isolated_inputs$gender_choice, 
                            ", Age: ", isolated_inputs$age_range[1], "-", isolated_inputs$age_range[2], ")"))
       
+      # Render the text summary of the model
       output$result_text <- renderPrint({
         print(refiner_model)
       })
 
+      # If auto-save is enabled, save the plot to the selected directory
       if (isolated_inputs$enable_directory && !is.null(selected_dir_reactive())) {
         filename <- generate_safe_filename("RefineR_Plot", selected_dir_reactive(), "png")
         png(filename, width = 800, height = 600)
@@ -150,6 +208,7 @@ mainServer <- function(input, output, session, data_reactive, selected_dir_react
         y_max <- usr[4]
         y_label_pos <- y_max * 0.95
 
+        # Add manual reference limit lines
         if (!is.na(isolated_inputs$ref_low) && is.numeric(isolated_inputs$ref_low)) {
           abline(v = isolated_inputs$ref_low, col = "red", lty = 2, lwd = 2)
           text(x = isolated_inputs$ref_low, y = y_label_pos,
@@ -177,20 +236,18 @@ mainServer <- function(input, output, session, data_reactive, selected_dir_react
       output$result_plot <- renderPlot(plot.new())
       print(error_message)
     }, finally = {
+      # Re-enable button and restore text when analysis finishes
       analysis_running_rv(FALSE)
       session$sendCustomMessage('analysisStatus', FALSE)
-      # Re-enable button and restore text when analysis finishes
       shinyjs::enable("analyze_btn")
       shinyjs::runjs("$('#analyze_btn').text('Analyze');")
     })
   })
 
-  # Live-updating plot output that depends on reactive inputs
+  # Renders the live-updating plot output that depends on reactive inputs
   output$result_plot <- renderPlot({
     refiner_model <- refiner_model_rv()
-    # Require the model to be present before plotting
-    req(refiner_model)
-
+    req(refiner_model) # Requires the model to be present before plotting
     plot_title <- plot_title_rv()
     
     plot(refiner_model, showCI = TRUE, RIperc = c(0.025, 0.975), showPathol = FALSE,
